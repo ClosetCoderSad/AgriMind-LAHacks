@@ -247,31 +247,61 @@ class TwelveLabsClientService:
         prompt: str | None = None,
     ) -> TwelveLabsTextResult:
         client, client_error = self._build_client()
+
         if client_error or client is None:
-            return TwelveLabsTextResult(status=(client_error.status if client_error else "failed"), error=(client_error.error if client_error else "client_init_failed"))
+            return TwelveLabsTextResult(
+                status=(client_error.status if client_error else "failed"),
+                error=(client_error.error if client_error else "client_init_failed"),
+            )
 
         try:
+            # Keep this call API-compatible with current TwelveLabs SDK variants.
             response = client.analyze(
                 video_id=video_id,
-                type=summary_type,
-                prompt=prompt if prompt else None,
+                prompt=prompt or "Summarize this video focusing on agricultural insights.",
             )
-            text = self._obj_attr(response, "summary", "text")
+
+            text = (
+                self._obj_attr(response, "summary")
+                or self._obj_attr(response, "text")
+                or self._obj_attr(response, "data")
+            )
+
             if not text:
                 chapters = getattr(response, "chapters", None)
                 highlights = getattr(response, "highlights", None)
+
                 if chapters:
-                    text = "\n".join(str(getattr(c, "headline", "")) for c in chapters if getattr(c, "headline", None))
+                    text = "\n".join(
+                        getattr(c, "headline", "")
+                        for c in chapters
+                        if getattr(c, "headline", None)
+                    )
                 elif highlights:
-                    text = "\n".join(str(getattr(h, "text", "")) for h in highlights if getattr(h, "text", None))
-            return TwelveLabsTextResult(status="ready", text=text or "No summary text returned.")
-        except Exception as exc:  # pragma: no cover
-            return TwelveLabsTextResult(status="failed", error=str(exc))
+                    text = "\n".join(
+                        getattr(h, "text", "")
+                        for h in highlights
+                        if getattr(h, "text", None)
+                    )
+
+            return TwelveLabsTextResult(
+                status="ready",
+                text=text or "No summary text returned.",
+            )
+
+        except Exception as exc:
+            return TwelveLabsTextResult(
+                status="failed",
+                error=str(exc),
+            )
 
     def ask_video(self, video_id: str, question: str) -> TwelveLabsTextResult:
         client, client_error = self._build_client()
         if client_error or client is None:
-            return TwelveLabsTextResult(status=(client_error.status if client_error else "failed"), error=(client_error.error if client_error else "client_init_failed"))
+            return TwelveLabsTextResult(
+                status=(client_error.status if client_error else "failed"),
+                error=(client_error.error if client_error else "client_init_failed"),
+            )
 
         if not question.strip():
             return TwelveLabsTextResult(status="failed", error="missing_question")
