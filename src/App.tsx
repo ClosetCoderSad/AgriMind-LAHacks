@@ -34,6 +34,8 @@ interface DiagnosisResult {
   actions: string[];
 }
 
+type AppPage = 'dashboard' | 'twelvelabs';
+
 const hasUploadPreset = Boolean(uploadPreset);
 const INITIAL_SENSORS: SensorSnapshot = {
   soilMoisture: 46,
@@ -160,6 +162,14 @@ function getWateringRecommendation(
 }
 
 function App() {
+  const getPageFromPath = (): AppPage => {
+    if (window.location.pathname === '/twelvelabs') {
+      return 'twelvelabs';
+    }
+    return 'dashboard';
+  };
+
+  const [activePage, setActivePage] = useState<AppPage>(() => getPageFromPath());
   const [sensors, setSensors] = useState<SensorSnapshot>(INITIAL_SENSORS);
   const [cropStage, setCropStage] = useState<CropStage>('vegetative');
   const [rainChance, setRainChance] = useState(35);
@@ -357,6 +367,22 @@ function App() {
     void loadIndexedVideos();
   }, []);
 
+  useEffect(() => {
+    const onPopState = () => {
+      setActivePage(getPageFromPath());
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const navigateToPage = (page: AppPage) => {
+    const targetPath = page === 'twelvelabs' ? '/twelvelabs' : '/';
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({}, '', targetPath);
+    }
+    setActivePage(page);
+  };
+
   const handleUploadError = (error: Error) => {
     setUploadMessage(`Upload failed: ${error.message}`);
   };
@@ -395,6 +421,25 @@ function App() {
           <p>Smart micro-farming assistant for soil health, leaf diagnosis, and watering plans.</p>
         </header>
 
+        <nav className="app-nav" aria-label="Main navigation">
+          <button
+            type="button"
+            className={activePage === 'dashboard' ? 'nav-link active' : 'nav-link'}
+            onClick={() => navigateToPage('dashboard')}
+          >
+            Dashboard
+          </button>
+          <button
+            type="button"
+            className={activePage === 'twelvelabs' ? 'nav-link active' : 'nav-link'}
+            onClick={() => navigateToPage('twelvelabs')}
+          >
+            TwelveLabs
+          </button>
+        </nav>
+
+        {activePage === 'dashboard' && (
+          <>
         <section className="card">
           <div className="card-title-row">
             <h2>Live Farm Snapshot</h2>
@@ -661,116 +706,129 @@ function App() {
               </div>
             </div>
           )}
+        </section>
+          </>
+        )}
 
-          <div className="video-ingest-panel">
-            <h3>Direct Video Ingestion (TwelveLabs)</h3>
-            <p>
+        {activePage === 'twelvelabs' && (
+          <section className="card">
+            <div className="card-title-row">
+              <h2>Direct Video Ingestion (TwelveLabs)</h2>
+              <span className="pill subtle">Standalone video intelligence page</span>
+            </div>
+
+            <p className="status">
               Use a public raw video URL if you want to ingest independently from Cloudinary uploads.
               Cloudinary video links are supported here.
             </p>
-            <input
-              type="url"
-              value={videoUrlInput}
-              onChange={(event) => setVideoUrlInput(event.target.value)}
-              placeholder="https://.../plant-growth.mp4"
-            />
-            <button type="button" onClick={() => void handleDirectVideoIngestion()} disabled={isIngestingVideo}>
-              {isIngestingVideo ? 'Ingesting...' : 'Ingest Video URL'}
-            </button>
-            {lastIngestionResult && (
-              <p>
-                <strong>Last Ingestion:</strong> {lastIngestionResult.status} - {lastIngestionResult.summary}
-              </p>
-            )}
-          </div>
 
-          <div className="video-insight-panel">
-            <div className="card-title-row">
-              <h3>TwelveLabs Video Intelligence</h3>
-              <button type="button" onClick={() => void loadIndexedVideos()} disabled={isLoadingIndexVideos}>
-                {isLoadingIndexVideos ? 'Loading...' : 'Refresh Index Videos'}
+            {uploadMessage && <p className="status">{uploadMessage}</p>}
+
+            <div className="video-ingest-panel">
+              <input
+                type="url"
+                value={videoUrlInput}
+                onChange={(event) => setVideoUrlInput(event.target.value)}
+                placeholder="https://.../plant-growth.mp4"
+              />
+              <button type="button" onClick={() => void handleDirectVideoIngestion()} disabled={isIngestingVideo}>
+                {isIngestingVideo ? 'Ingesting...' : 'Ingest Video URL'}
               </button>
+              {lastIngestionResult && (
+                <p>
+                  <strong>Last Ingestion:</strong> {lastIngestionResult.status} - {lastIngestionResult.summary}
+                </p>
+              )}
             </div>
 
-            <label>
-              Select video from existing index
-              <select value={selectedVideoId} onChange={(event) => setSelectedVideoId(event.target.value)}>
-                <option value="">Choose an indexed video</option>
-                {indexedVideos.map((video) => (
-                  <option key={video.video_id} value={video.video_id}>
-                    {video.filename || video.video_id}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="video-insight-panel">
+              <div className="card-title-row">
+                <h3>TwelveLabs Video Intelligence</h3>
+                <button type="button" onClick={() => void loadIndexedVideos()} disabled={isLoadingIndexVideos}>
+                  {isLoadingIndexVideos ? 'Loading...' : 'Refresh Index Videos'}
+                </button>
+              </div>
 
-            <div className="summary-controls">
               <label>
-                Summary type
-                <select value={summaryType} onChange={(event) => setSummaryType(event.target.value as 'summary' | 'chapter' | 'highlight')}>
-                  <option value="summary">Summary</option>
-                  <option value="chapter">Chapter</option>
-                  <option value="highlight">Highlight</option>
+                Select video from existing index
+                <select value={selectedVideoId} onChange={(event) => setSelectedVideoId(event.target.value)}>
+                  <option value="">Choose an indexed video</option>
+                  {indexedVideos.map((video) => (
+                    <option key={video.video_id} value={video.video_id}>
+                      {video.filename || video.video_id}
+                    </option>
+                  ))}
                 </select>
               </label>
 
-              <label>
-                Optional custom summary prompt
-                <input
-                  type="text"
-                  value={summaryPrompt}
-                  onChange={(event) => setSummaryPrompt(event.target.value)}
-                  placeholder="Focus on disease progression and actionable insights"
-                />
-              </label>
+              <div className="summary-controls">
+                <label>
+                  Summary type
+                  <select value={summaryType} onChange={(event) => setSummaryType(event.target.value as 'summary' | 'chapter' | 'highlight')}>
+                    <option value="summary">Summary</option>
+                    <option value="chapter">Chapter</option>
+                    <option value="highlight">Highlight</option>
+                  </select>
+                </label>
 
-              <button type="button" onClick={() => void handleSummarizeVideo()} disabled={isSummarizing}>
-                {isSummarizing ? 'Generating summary...' : 'Generate AI Summary'}
-              </button>
+                <label>
+                  Optional custom summary prompt
+                  <input
+                    type="text"
+                    value={summaryPrompt}
+                    onChange={(event) => setSummaryPrompt(event.target.value)}
+                    placeholder="Focus on disease progression and actionable insights"
+                  />
+                </label>
 
-              {summaryOutput && <p className="text-output">{summaryOutput}</p>}
+                <button type="button" onClick={() => void handleSummarizeVideo()} disabled={isSummarizing}>
+                  {isSummarizing ? 'Generating summary...' : 'Generate AI Summary'}
+                </button>
+
+                {summaryOutput && <p className="text-output">{summaryOutput}</p>}
+              </div>
+
+              <div className="qna-controls">
+                <label>
+                  Ask Q&A about selected video
+                  <input
+                    type="text"
+                    value={videoQuestion}
+                    onChange={(event) => setVideoQuestion(event.target.value)}
+                    placeholder="What signs of disease progression are visible?"
+                  />
+                </label>
+
+                <button type="button" onClick={() => void handleAskQna()} disabled={isAskingQna}>
+                  {isAskingQna ? 'Getting answer...' : 'Ask Video Q&A'}
+                </button>
+
+                {qnaOutput && <p className="text-output">{qnaOutput}</p>}
+              </div>
             </div>
 
-            <div className="qna-controls">
-              <label>
-                Ask Q&A about selected video
-                <input
-                  type="text"
-                  value={videoQuestion}
-                  onChange={(event) => setVideoQuestion(event.target.value)}
-                  placeholder="What signs of disease progression are visible?"
-                />
-              </label>
-
-              <button type="button" onClick={() => void handleAskQna()} disabled={isAskingQna}>
-                {isAskingQna ? 'Getting answer...' : 'Ask Video Q&A'}
-              </button>
-
-              {qnaOutput && <p className="text-output">{qnaOutput}</p>}
+            <div className="twelvelabs-log-panel">
+              <div className="card-title-row">
+                <h3>TwelveLabs Ingestion Logs</h3>
+                <button type="button" onClick={() => void loadTwelvelabsHistory()} disabled={isLoadingHistory}>
+                  {isLoadingHistory ? 'Refreshing...' : 'Refresh Logs'}
+                </button>
+              </div>
+              {twelvelabsHistory.length === 0 ? (
+                <p>No ingestion logs yet.</p>
+              ) : (
+                <ul>
+                  {twelvelabsHistory.slice(0, 8).map((entry) => (
+                    <li key={`${entry.created_at}-${entry.indexed_asset_id || entry.asset_id || entry.status}`}>
+                      {entry.created_at} | {entry.status} | index: {entry.index_id || 'n/a'} | indexed asset:{' '}
+                      {entry.indexed_asset_id || 'n/a'}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-          </div>
-
-          <div className="twelvelabs-log-panel">
-            <div className="card-title-row">
-              <h3>TwelveLabs Ingestion Logs</h3>
-              <button type="button" onClick={() => void loadTwelvelabsHistory()} disabled={isLoadingHistory}>
-                {isLoadingHistory ? 'Refreshing...' : 'Refresh Logs'}
-              </button>
-            </div>
-            {twelvelabsHistory.length === 0 ? (
-              <p>No ingestion logs yet.</p>
-            ) : (
-              <ul>
-                {twelvelabsHistory.slice(0, 8).map((entry) => (
-                  <li key={`${entry.created_at}-${entry.indexed_asset_id || entry.asset_id || entry.status}`}>
-                    {entry.created_at} | {entry.status} | index: {entry.index_id || 'n/a'} | indexed asset:{' '}
-                    {entry.indexed_asset_id || 'n/a'}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </section>
+          </section>
+        )}
       </main>
     </div>
   );

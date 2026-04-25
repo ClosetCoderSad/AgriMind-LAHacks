@@ -12,6 +12,32 @@
   gap: 1rem;
 }
 
+.app-nav {
+  display: flex;
+  gap: 0.5rem;
+  background: #ffffff;
+  border: 1px solid #dcf2e2;
+  border-radius: 1rem;
+  padding: 0.6rem;
+  box-shadow: 0 4px 18px rgba(16, 24, 40, 0.05);
+}
+
+.nav-link {
+  border: 1px solid #bbf7d0;
+  border-radius: 999px;
+  padding: 0.45rem 0.9rem;
+  background: #f8fff9;
+  color: #14532d;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.nav-link.active {
+  background: #14532d;
+  color: #ecfdf5;
+  border-color: #14532d;
+}
+
 .hero {
   background: #0d6838;
   border-radius: 1rem;
