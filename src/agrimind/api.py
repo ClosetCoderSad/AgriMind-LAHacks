@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import pickle
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,8 @@ upload_dir = Path("data/uploads")
 upload_dir.mkdir(parents=True, exist_ok=True)
 result_pkl_dir = Path("data/results_pkl")
 result_pkl_dir.mkdir(parents=True, exist_ok=True)
+result_json_dir = Path("data/results_json")
+result_json_dir.mkdir(parents=True, exist_ok=True)
 
 
 def _persist_result_pickle(scan_id: str, result: dict) -> str:
@@ -25,6 +28,14 @@ def _persist_result_pickle(scan_id: str, result: dict) -> str:
     out_path = result_pkl_dir / f"{scan_id}_{ts}.pkl"
     with out_path.open("wb") as f:
         pickle.dump(result, f)
+    return str(out_path.resolve())
+
+
+def _persist_result_json(scan_id: str, result: dict) -> str:
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    out_path = result_json_dir / f"{scan_id}_{ts}.json"
+    with out_path.open("w", encoding="utf-8") as f:
+        json.dump(result, f, indent=2)
     return str(out_path.resolve())
 
 
@@ -51,6 +62,7 @@ def analyze(capture: CaptureEvent) -> dict:
         "gemma_advice": advice.model_dump(),
     }
     result["result_pkl_path"] = _persist_result_pickle(capture.scan_id, result)
+    result["result_json_path"] = _persist_result_json(capture.scan_id, result)
     return result
 
 
