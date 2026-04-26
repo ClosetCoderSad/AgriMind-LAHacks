@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getTwelvelabsHistory,
   getTwelvelabsIndexVideos,
@@ -47,7 +47,43 @@ interface ParsedFarmSegment {
   endSec: number;
 }
 
-type AppPage = 'dashboard' | 'twelvelabs' | 'cloudinary';
+type ChatRole = 'user' | 'agent';
+
+interface IrrigatorChatMessage {
+  role: ChatRole;
+  text: string;
+}
+
+interface IrrigatorFormState {
+  city: string;
+  latitude: string;
+  longitude: string;
+  temperature: number;
+  moisture: number;
+  light: number;
+  airQuality: number;
+}
+
+interface IrrigatorResult {
+  rainExpected: boolean;
+  weatherSummary: string;
+  waterNeed: number;
+  action: 'water' | 'skip';
+  amountMl: number;
+  reason: string;
+}
+
+interface SensorTrendPoint {
+  label: string;
+  temperatureC: number;
+  airQuality: number;
+  moisture: number;
+  lightLux: number;
+}
+
+type TrendMetricKey = 'temperatureC' | 'airQuality' | 'moisture' | 'lightLux';
+
+type AppPage = 'dashboard' | 'twelvelabs' | 'cloudinary' | 'diseaseAnalysis' | 'irrigator';
 
 const hasUploadPreset = Boolean(uploadPreset);
 const INITIAL_SENSORS: SensorSnapshot = {
@@ -57,6 +93,27 @@ const INITIAL_SENSORS: SensorSnapshot = {
   lightLux: 12000,
   ph: 6.7,
 };
+const INITIAL_IRRIGATOR_FORM: IrrigatorFormState = {
+  city: 'Toronto',
+  latitude: '',
+  longitude: '',
+  temperature: 30,
+  moisture: 28,
+  light: 900,
+  airQuality: 72,
+};
+const SENSOR_TREND_DATA: SensorTrendPoint[] = [
+  { label: '06:00', temperatureC: 22, airQuality: 79, moisture: 58, lightLux: 1800 },
+  { label: '08:00', temperatureC: 24, airQuality: 76, moisture: 56, lightLux: 5200 },
+  { label: '10:00', temperatureC: 27, airQuality: 73, moisture: 53, lightLux: 12000 },
+  { label: '12:00', temperatureC: 31, airQuality: 68, moisture: 49, lightLux: 19500 },
+  { label: '14:00', temperatureC: 33, airQuality: 65, moisture: 46, lightLux: 23400 },
+  { label: '16:00', temperatureC: 30, airQuality: 69, moisture: 44, lightLux: 20100 },
+  { label: '18:00', temperatureC: 27, airQuality: 74, moisture: 45, lightLux: 11800 },
+  { label: '20:00', temperatureC: 24, airQuality: 78, moisture: 47, lightLux: 3200 },
+];
+const TREND_REFRESH_MS = 2500;
+const TREND_POINT_LIMIT = 24;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -209,6 +266,254 @@ function parseFarmSegments(text: string): ParsedFarmSegment[] {
   return segments;
 }
 
+function computeEt(temperature: number, light: number): number {
+  const lightFactor = light / 1000;
+  return Math.max(0, 0.0023 * (temperature + 17.8) * lightFactor);
+}
+
+function computeDryness(moisture: number): number {
+  return clamp(1 - moisture / 100, 0, 1);
+}
+
+function computeStressFactor(airQuality: number): number {
+  const stress = clamp(1 - airQuality / 100, 0, 1);
+  return 1 + 0.3 * stress;
+}
+
+function rainAdjustment(rainExpected: boolean): number {
+  return rainExpected ? 0.3 : 1.0;
+}
+
+function computeWaterNeed(
+  temperature: number,
+  light: number,
+  moisture: number,
+  airQuality: number,
+  rainExpected: boolean
+): number {
+  return (
+    computeEt(temperature, light) *
+    computeDryness(moisture) *
+    computeStressFactor(airQuality) *
+    rainAdjustment(rainExpected)
+  );
+}
+
+function decideIrrigation(waterNeed: number): { action: 'water' | 'skip'; amountMl: number } {
+  if (waterNeed > 0.025) {
+    return { action: 'water', amountMl: 400 };
+  }
+  if (waterNeed > 0.015) {
+    return { action: 'water', amountMl: 200 };
+  }
+  return { action: 'skip', amountMl: 0 };
+}
+
+function generateIrrigationReason(
+  waterNeed: number,
+  action: 'water' | 'skip',
+  amountMl: number,
+  rainExpected: boolean
+): string {
+  if (action === 'skip') {
+    return `Water need index is ${waterNeed.toFixed(4)} and below threshold, so irrigation is skipped for now.`;
+  }
+  if (rainExpected) {
+    return `Rain is expected, so irrigation is reduced to ${amountMl} ml based on a water need index of ${waterNeed.toFixed(4)}.`;
+  }
+  return `No major rain expected and water need index is ${waterNeed.toFixed(4)}, so irrigate with ${amountMl} ml.`;
+}
+
+function getLinePath(values: number[], width = 300, height = 96): string {
+  if (values.length === 0) return '';
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const stepX = values.length > 1 ? width / (values.length - 1) : width;
+
+  return values
+    .map((value, index) => {
+      const x = index * stepX;
+      const y = height - ((value - min) / range) * height;
+      return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)}`;
+    })
+    .join(' ');
+}
+
+function getAreaPath(values: number[], width = 300, height = 96): string {
+  if (values.length === 0) return '';
+  const line = getLinePath(values, width, height);
+  return `${line} L ${width} ${height} L 0 ${height} Z`;
+}
+
+function formatTrendLabel(date: Date): string {
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function generateNextTrendPoint(previous: SensorTrendPoint, tick: number, clock: Date): SensorTrendPoint {
+  const hour = clock.getHours() + clock.getMinutes() / 60;
+  const daylightFactor = Math.max(0, Math.sin(((hour - 6) / 12) * Math.PI));
+  const randomDelta = () => Math.random() - 0.5;
+
+  let moisture = clamp(previous.moisture - 0.45 + Math.cos(tick / 3.8) * 0.6 + randomDelta() * 1.3, 26, 72);
+  if (moisture < 31) {
+    moisture = clamp(moisture + 5.5, 26, 72);
+  }
+
+  const temperatureC = clamp(
+    previous.temperatureC + Math.sin(tick / 4.2) * 0.6 + (daylightFactor - 0.4) * 0.5 + randomDelta() * 0.8,
+    17,
+    39
+  );
+  const airQuality = clamp(
+    previous.airQuality + Math.cos(tick / 5.1) * 1.3 + randomDelta() * 2.2,
+    48,
+    93
+  );
+  const lightLux = clamp(
+    daylightFactor * 23000 + Math.sin(tick / 2.4) * 700 + randomDelta() * 900,
+    300,
+    28000
+  );
+
+  return {
+    label: formatTrendLabel(clock),
+    temperatureC: Math.round(temperatureC),
+    airQuality: Math.round(airQuality),
+    moisture: Math.round(moisture),
+    lightLux: Math.round(lightLux),
+  };
+}
+
+interface TrendCardProps {
+  title: string;
+  subtitle: string;
+  valueSuffix: string;
+  rangeSuffix: string;
+  metric: TrendMetricKey;
+  points: SensorTrendPoint[];
+  className: string;
+  formatter?: (value: number) => string;
+}
+
+function TrendCard({
+  title,
+  subtitle,
+  valueSuffix,
+  rangeSuffix,
+  metric,
+  points,
+  className,
+  formatter,
+}: TrendCardProps) {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const values = useMemo(() => points.map((point) => point[metric]), [metric, points]);
+  const linePath = useMemo(() => getLinePath(values), [values]);
+  const areaPath = useMemo(() => getAreaPath(values), [values]);
+  const currentValue = values[values.length - 1];
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const displayValue = formatter ? formatter(currentValue) : `${currentValue}`;
+  const displayMin = formatter ? formatter(minValue) : `${minValue}`;
+  const displayMax = formatter ? formatter(maxValue) : `${maxValue}`;
+  const activeIndex = hoveredIndex ?? values.length - 1;
+  const activePoint = points[activeIndex];
+  const activeValue = values[activeIndex];
+  const width = 300;
+  const stepX = values.length > 1 ? width / (values.length - 1) : width;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const dotX = activeIndex * stepX;
+  const dotY = 96 - ((activeValue - min) / range) * 96;
+
+  const handleMouseMove = (event: React.MouseEvent<SVGSVGElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = clamp((event.clientX - rect.left) / rect.width, 0, 1);
+    const index = Math.round(ratio * (values.length - 1));
+    setHoveredIndex(index);
+  };
+
+  return (
+    <article className={`trend-card ${className}`}>
+      <div className="trend-card-header">
+        <h3>{title}</h3>
+        <strong>
+          {displayValue}
+          {valueSuffix}
+        </strong>
+      </div>
+      <p className="trend-meta">{subtitle}</p>
+      <div className="trend-chart-wrap">
+        <svg
+          viewBox="0 0 300 96"
+          className="trend-chart"
+          role="img"
+          aria-label={`${title} trend line chart`}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={() => setHoveredIndex(null)}
+        >
+          <path d={areaPath} className="trend-area" />
+          <path d={linePath} />
+          <line x1={dotX} x2={dotX} y1={0} y2={96} className="trend-crosshair" />
+          <circle cx={dotX} cy={dotY} r={4} className="trend-dot" />
+        </svg>
+        <div className="trend-tooltip">
+          <span>{activePoint.label}</span>
+          <strong>
+            {formatter ? formatter(activeValue) : activeValue}
+            {valueSuffix}
+          </strong>
+        </div>
+      </div>
+      <p className="trend-range">
+        Range: {displayMin}
+        {rangeSuffix} - {displayMax}
+        {rangeSuffix}
+      </p>
+    </article>
+  );
+}
+
+async function geocodeCity(city: string): Promise<{ latitude: number; longitude: number }> {
+  const response = await fetch(
+    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1`
+  );
+  if (!response.ok) {
+    throw new Error('Could not geocode city.');
+  }
+  const data = (await response.json()) as { results?: Array<{ latitude: number; longitude: number }> };
+  const first = data.results?.[0];
+  if (!first) {
+    throw new Error(`No geocoding result found for "${city}".`);
+  }
+  return { latitude: first.latitude, longitude: first.longitude };
+}
+
+async function fetchRainExpected(latitude: number, longitude: number): Promise<{
+  rainExpected: boolean;
+  weatherSummary: string;
+}> {
+  const params = new URLSearchParams({
+    latitude: latitude.toString(),
+    longitude: longitude.toString(),
+    hourly: 'precipitation_probability',
+    forecast_days: '1',
+    timezone: 'auto',
+  });
+  const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error('Could not fetch weather forecast.');
+  }
+  const data = (await response.json()) as { hourly?: { precipitation_probability?: number[] } };
+  const precipitation = data.hourly?.precipitation_probability ?? [];
+  const maxProbability = precipitation.length > 0 ? Math.max(...precipitation) : 0;
+  return {
+    rainExpected: maxProbability >= 50,
+    weatherSummary: `Max precip probability today: ${maxProbability}%`,
+  };
+}
+
 function App() {
   const getPageFromPath = (): AppPage => {
     const p = window.location.pathname;
@@ -217,6 +522,12 @@ function App() {
     }
     if (p === '/cloudinary' || p.startsWith('/cloudinary/')) {
       return 'cloudinary';
+    }
+    if (p === '/disease-analysis' || p.startsWith('/disease-analysis/')) {
+      return 'diseaseAnalysis';
+    }
+    if (p === '/irrigator' || p.startsWith('/irrigator/')) {
+      return 'irrigator';
     }
     return 'dashboard';
   };
@@ -257,7 +568,21 @@ function App() {
   const [isLoadingCloudinary, setIsLoadingCloudinary] = useState(false);
   const [cloudinaryLastUpload, setCloudinaryLastUpload] = useState<CloudinaryUploadResult | null>(null);
   const [isRunningLocalCloudinary, setIsRunningLocalCloudinary] = useState(false);
+  const [irrigatorForm, setIrrigatorForm] = useState<IrrigatorFormState>(INITIAL_IRRIGATOR_FORM);
+  const [irrigatorResult, setIrrigatorResult] = useState<IrrigatorResult | null>(null);
+  const [irrigatorChat, setIrrigatorChat] = useState<IrrigatorChatMessage[]>([]);
+  const [irrigatorChatInput, setIrrigatorChatInput] = useState('');
+  const [isRunningIrrigator, setIsRunningIrrigator] = useState(false);
+  const [irrigatorError, setIrrigatorError] = useState('');
+  const [trendPoints, setTrendPoints] = useState<SensorTrendPoint[]>(SENSOR_TREND_DATA);
+  const [trendTick, setTrendTick] = useState(SENSOR_TREND_DATA.length);
+  const [trendWindow, setTrendWindow] = useState<12 | 24>(24);
+  const [isTrendLive, setIsTrendLive] = useState(true);
+  const [diseasePreviewUrl, setDiseasePreviewUrl] = useState('');
+  const [diseasePreviewName, setDiseasePreviewName] = useState('');
+  const [isDragOverDiseaseDropzone, setIsDragOverDiseaseDropzone] = useState(false);
   const indexedPreviewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const diseaseFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const cloudinaryWidgetOptions = useMemo(
     () => ({
@@ -530,9 +855,56 @@ function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
+  useEffect(() => {
+    const scriptId = 'elevenlabs-convai-script';
+    if (document.getElementById(scriptId)) {
+      return;
+    }
+    const script = document.createElement('script');
+    script.id = scriptId;
+    script.src = 'https://unpkg.com/@elevenlabs/convai-widget-embed';
+    script.async = true;
+    script.type = 'text/javascript';
+    document.body.appendChild(script);
+  }, []);
+
+  useEffect(() => {
+    if (activePage !== 'dashboard' || !isTrendLive) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setTrendPoints((previous) => {
+        const last = previous[previous.length - 1];
+        const now = new Date();
+        const nextPoint = generateNextTrendPoint(last, trendTick + 1, now);
+        const updated = [...previous, nextPoint];
+        return updated.slice(-TREND_POINT_LIMIT);
+      });
+      setTrendTick((prev) => prev + 1);
+    }, TREND_REFRESH_MS);
+
+    return () => window.clearInterval(timer);
+  }, [activePage, isTrendLive, trendTick]);
+
+  useEffect(() => {
+    return () => {
+      if (diseasePreviewUrl) {
+        URL.revokeObjectURL(diseasePreviewUrl);
+      }
+    };
+  }, [diseasePreviewUrl]);
+
   const navigateToPage = (page: AppPage) => {
     const targetPath =
-      page === 'twelvelabs' ? '/twelvelabs' : page === 'cloudinary' ? '/cloudinary' : '/';
+      page === 'twelvelabs'
+        ? '/twelvelabs'
+        : page === 'cloudinary'
+          ? '/cloudinary'
+          : page === 'diseaseAnalysis'
+            ? '/disease-analysis'
+          : page === 'irrigator'
+            ? '/irrigator'
+            : '/';
     if (window.location.pathname !== targetPath) {
       window.history.pushState({}, '', targetPath);
     }
@@ -541,6 +913,37 @@ function App() {
 
   const handleUploadError = (error: Error) => {
     setUploadMessage(`Upload failed: ${error.message}`);
+  };
+
+  const applyDiseasePreviewFile = (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      return;
+    }
+    if (diseasePreviewUrl) {
+      URL.revokeObjectURL(diseasePreviewUrl);
+    }
+    const objectUrl = URL.createObjectURL(file);
+    setDiseasePreviewUrl(objectUrl);
+    setDiseasePreviewName(file.name);
+  };
+
+  const handleDiseaseFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    applyDiseasePreviewFile(file);
+    event.target.value = '';
+  };
+
+  const handleDiseaseDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDragOverDiseaseDropzone(false);
+    const file = event.dataTransfer.files?.[0];
+    if (!file) {
+      return;
+    }
+    applyDiseasePreviewFile(file);
   };
 
   const healthScore = useMemo(() => scoreHealth(sensors), [sensors]);
@@ -579,6 +982,7 @@ function App() {
       ? lastIngestionResult?.stream_url || lastIngestedSourceUrl
       : null);
   const parsedFarmSegments = useMemo(() => parseFarmSegments(farmSegmentsOutput), [farmSegmentsOutput]);
+  const visibleTrendPoints = useMemo(() => trendPoints.slice(-trendWindow), [trendPoints, trendWindow]);
 
   const handlePlayFarmSegment = (segment: ParsedFarmSegment) => {
     const video = indexedPreviewVideoRef.current;
@@ -601,6 +1005,90 @@ function App() {
       video.pause();
       setActiveSegmentEndSec(null);
     }
+  };
+
+  const runIrrigator = async () => {
+    setIsRunningIrrigator(true);
+    setIrrigatorError('');
+    setIrrigatorResult(null);
+
+    try {
+      let latitude = Number(irrigatorForm.latitude);
+      let longitude = Number(irrigatorForm.longitude);
+
+      if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
+        if (!irrigatorForm.city.trim()) {
+          throw new Error('Provide either city or both latitude and longitude.');
+        }
+        const geocoded = await geocodeCity(irrigatorForm.city.trim());
+        latitude = geocoded.latitude;
+        longitude = geocoded.longitude;
+      }
+
+      const weather = await fetchRainExpected(latitude, longitude);
+      const waterNeed = computeWaterNeed(
+        irrigatorForm.temperature,
+        irrigatorForm.light,
+        irrigatorForm.moisture,
+        irrigatorForm.airQuality,
+        weather.rainExpected
+      );
+      const decision = decideIrrigation(waterNeed);
+      const reason = generateIrrigationReason(
+        waterNeed,
+        decision.action,
+        decision.amountMl,
+        weather.rainExpected
+      );
+
+      const result: IrrigatorResult = {
+        rainExpected: weather.rainExpected,
+        weatherSummary: weather.weatherSummary,
+        waterNeed,
+        action: decision.action,
+        amountMl: decision.amountMl,
+        reason,
+      };
+      setIrrigatorResult(result);
+      setIrrigatorChat([
+        {
+          role: 'agent',
+          text: `${weather.weatherSummary}. Decision: ${result.action.toUpperCase()} ${result.amountMl} ml. ${result.reason}`,
+        },
+      ]);
+    } catch (error) {
+      setIrrigatorError(error instanceof Error ? error.message : 'Irrigator run failed.');
+    } finally {
+      setIsRunningIrrigator(false);
+    }
+  };
+
+  const handleIrrigatorChatSend = () => {
+    const question = irrigatorChatInput.trim();
+    if (!question) {
+      return;
+    }
+
+    setIrrigatorChat((prev) => [...prev, { role: 'user', text: question }]);
+    setIrrigatorChatInput('');
+
+    let answer = 'Run the irrigator first so I can answer with current conditions.';
+    if (irrigatorResult) {
+      const q = question.toLowerCase();
+      if (q.includes('why')) {
+        answer = irrigatorResult.reason;
+      } else if (q.includes('rain')) {
+        answer = `${irrigatorResult.weatherSummary}. Rain expected: ${irrigatorResult.rainExpected ? 'yes' : 'no'}.`;
+      } else if (q.includes('water need') || q.includes('index')) {
+        answer = `Water need index is ${irrigatorResult.waterNeed.toFixed(4)}.`;
+      } else if (q.includes('how much') || q.includes('amount')) {
+        answer = `Recommended irrigation amount is ${irrigatorResult.amountMl} ml.`;
+      } else {
+        answer = `Action is ${irrigatorResult.action} with ${irrigatorResult.amountMl} ml. ${irrigatorResult.reason}`;
+      }
+    }
+
+    setIrrigatorChat((prev) => [...prev, { role: 'agent', text: answer }]);
   };
 
   return (
@@ -633,10 +1121,24 @@ function App() {
           >
             Cloudinary
           </button>
+          <button
+            type="button"
+            className={activePage === 'diseaseAnalysis' ? 'nav-link active' : 'nav-link'}
+            onClick={() => navigateToPage('diseaseAnalysis')}
+          >
+            Disease Analysis
+          </button>
+          <button
+            type="button"
+            className={activePage === 'irrigator' ? 'nav-link active' : 'nav-link'}
+            onClick={() => navigateToPage('irrigator')}
+          >
+            Irrigator
+          </button>
         </nav>
 
         {activePage === 'dashboard' && (
-          <>
+          <div className="dashboard-page">
         <section className="card">
           <div className="card-title-row">
             <h2>Live Farm Snapshot</h2>
@@ -661,6 +1163,72 @@ function App() {
           </div>
 
           <p className="status">{healthStatus}</p>
+
+          <div className="trend-toolbar">
+            <div className="trend-window-group">
+              <button
+                type="button"
+                className={trendWindow === 12 ? 'trend-toggle active' : 'trend-toggle'}
+                onClick={() => setTrendWindow(12)}
+              >
+                Last 12
+              </button>
+              <button
+                type="button"
+                className={trendWindow === 24 ? 'trend-toggle active' : 'trend-toggle'}
+                onClick={() => setTrendWindow(24)}
+              >
+                Last 24
+              </button>
+            </div>
+            <button
+              type="button"
+              className={isTrendLive ? 'trend-live-btn active' : 'trend-live-btn'}
+              onClick={() => setIsTrendLive((prev) => !prev)}
+            >
+              {isTrendLive ? 'Live updates ON' : 'Paused'}
+            </button>
+          </div>
+
+          <div className="sensor-trend-grid">
+            <TrendCard
+              title="Temperature"
+              subtitle="Reactive climate trend"
+              metric="temperatureC"
+              points={visibleTrendPoints}
+              className="temperature"
+              valueSuffix="C"
+              rangeSuffix="C"
+            />
+            <TrendCard
+              title="Air Quality Index"
+              subtitle="Lower values are cleaner"
+              metric="airQuality"
+              points={visibleTrendPoints}
+              className="air-quality"
+              valueSuffix=" AQI"
+              rangeSuffix=" AQI"
+            />
+            <TrendCard
+              title="Humidity / Moisture"
+              subtitle="Soil plus canopy moisture blend"
+              metric="moisture"
+              points={visibleTrendPoints}
+              className="moisture"
+              valueSuffix="%"
+              rangeSuffix="%"
+            />
+            <TrendCard
+              title="Light Levels"
+              subtitle="Diurnal daylight simulation"
+              metric="lightLux"
+              points={visibleTrendPoints}
+              className="light"
+              valueSuffix=" lux"
+              rangeSuffix=" lux"
+              formatter={(value) => value.toLocaleString()}
+            />
+          </div>
 
           <div className="grid sensors-grid">
             <label>
@@ -904,7 +1472,13 @@ function App() {
             </div>
           )}
         </section>
-          </>
+
+        <div className="dashboard-convai-widget" aria-label="AgriMind voice assistant widget">
+          {createElement('elevenlabs-convai', {
+            'agent-id': 'agent_9501kmv3szh3emn8r5b915eewaq0',
+          })}
+        </div>
+          </div>
         )}
 
         {activePage === 'twelvelabs' && (
@@ -1192,9 +1766,9 @@ function App() {
                         const method = s.method;
                         return (
                           <>
-                            <p>- Water saved estimate: {water ?? 'n/a'} L</p>
-                            <p>- Carbon avoided estimate: {carbon ?? 'n/a'} kg CO2e</p>
-                            <p>- Travel avoided estimate: {trips ?? 'n/a'} km</p>
+                            <p>- Water saved estimate: {water != null ? String(water) : 'n/a'} L</p>
+                            <p>- Carbon avoided estimate: {carbon != null ? String(carbon) : 'n/a'} kg CO2e</p>
+                            <p>- Travel avoided estimate: {trips != null ? String(trips) : 'n/a'} km</p>
                             {note ? <p>- Waste reduction note: {String(note)}</p> : null}
                             {method ? <p>- Method: {String(method)}</p> : null}
                           </>
@@ -1254,6 +1828,212 @@ function App() {
                   ))}
                 </ul>
               )}
+            </div>
+          </section>
+        )}
+
+        {activePage === 'diseaseAnalysis' && (
+          <section className="card disease-analysis-page">
+            <div className="card-title-row">
+              <h2>Disease Analysis</h2>
+              <span className="pill subtle">Drag and drop image upload</span>
+            </div>
+            <p className="status">
+              Upload a crop/leaf image to preview it here. Classification Model will run.
+            </p>
+
+            <input
+              ref={diseaseFileInputRef}
+              type="file"
+              accept="image/*"
+              className="disease-file-input"
+              onChange={handleDiseaseFileInputChange}
+            />
+
+            <div
+              className={
+                isDragOverDiseaseDropzone
+                  ? 'disease-dropzone drag-active'
+                  : 'disease-dropzone'
+              }
+              role="button"
+              tabIndex={0}
+              onClick={() => diseaseFileInputRef.current?.click()}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setIsDragOverDiseaseDropzone(true);
+              }}
+              onDragLeave={() => setIsDragOverDiseaseDropzone(false)}
+              onDrop={handleDiseaseDrop}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  diseaseFileInputRef.current?.click();
+                }
+              }}
+              aria-label="Upload image for disease analysis preview"
+            >
+              <p>Drag and drop an image here</p>
+              <span>or click to browse files</span>
+            </div>
+
+            {diseasePreviewUrl && (
+              <div className="disease-preview-card">
+                <img src={diseasePreviewUrl} alt="Disease analysis upload preview" />
+                <p>
+                  <strong>Selected file:</strong> {diseasePreviewName}
+                </p>
+              </div>
+            )}
+          </section>
+        )}
+
+        {activePage === 'irrigator' && (
+          <section className="card irrigator-page">
+            <div className="card-title-row">
+              <h2>Irrigation Agent (ET-based)</h2>
+              <span className="pill subtle">Standalone irrigator UI</span>
+            </div>
+            <p className="status">
+              Enter sensor and location inputs, then run the irrigator to get action, amount, and reason.
+            </p>
+
+            <div className="grid irrigator-form-grid">
+              <label>
+                City (optional if lat/lon are set)
+                <input
+                  type="text"
+                  value={irrigatorForm.city}
+                  onChange={(event) => setIrrigatorForm((prev) => ({ ...prev, city: event.target.value }))}
+                  placeholder="Toronto"
+                />
+              </label>
+              <label>
+                Latitude
+                <input
+                  type="number"
+                  value={irrigatorForm.latitude}
+                  onChange={(event) =>
+                    setIrrigatorForm((prev) => ({ ...prev, latitude: event.target.value }))
+                  }
+                  placeholder="43.65"
+                />
+              </label>
+              <label>
+                Longitude
+                <input
+                  type="number"
+                  value={irrigatorForm.longitude}
+                  onChange={(event) =>
+                    setIrrigatorForm((prev) => ({ ...prev, longitude: event.target.value }))
+                  }
+                  placeholder="-79.38"
+                />
+              </label>
+              <label>
+                Temperature (C)
+                <input
+                  type="number"
+                  value={irrigatorForm.temperature}
+                  onChange={(event) =>
+                    setIrrigatorForm((prev) => ({ ...prev, temperature: Number(event.target.value) }))
+                  }
+                />
+              </label>
+              <label>
+                Moisture (%)
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={irrigatorForm.moisture}
+                  onChange={(event) =>
+                    setIrrigatorForm((prev) => ({ ...prev, moisture: Number(event.target.value) }))
+                  }
+                />
+              </label>
+              <label>
+                Light
+                <input
+                  type="number"
+                  value={irrigatorForm.light}
+                  onChange={(event) =>
+                    setIrrigatorForm((prev) => ({ ...prev, light: Number(event.target.value) }))
+                  }
+                />
+              </label>
+              <label>
+                Air quality (%)
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={irrigatorForm.airQuality}
+                  onChange={(event) =>
+                    setIrrigatorForm((prev) => ({ ...prev, airQuality: Number(event.target.value) }))
+                  }
+                />
+              </label>
+            </div>
+
+            <button
+              type="button"
+              className="run-decision-btn"
+              onClick={() => void runIrrigator()}
+              disabled={isRunningIrrigator}
+            >
+              {isRunningIrrigator ? 'Running irrigator...' : 'Run Irrigator'}
+            </button>
+
+            {irrigatorError && <p className="warning">{irrigatorError}</p>}
+
+            {irrigatorResult && (
+              <div className="agent-output">
+                <p>
+                  <strong>Weather:</strong> {irrigatorResult.weatherSummary}
+                </p>
+                <p>
+                  <strong>Water need index:</strong> {irrigatorResult.waterNeed.toFixed(4)}
+                </p>
+                <p>
+                  <strong>Action:</strong> {irrigatorResult.action}
+                </p>
+                <p>
+                  <strong>Amount:</strong> {irrigatorResult.amountMl} ml
+                </p>
+                <p>{irrigatorResult.reason}</p>
+              </div>
+            )}
+
+            <div className="irrigator-chat-widget">
+              <h3>Irrigator Chat</h3>
+              <div className="irrigator-chat-log">
+                {irrigatorChat.length === 0 ? (
+                  <p className="status">No messages yet. Run irrigator and ask follow-up questions.</p>
+                ) : (
+                  irrigatorChat.map((message, index) => (
+                    <p key={`${message.role}-${index}`} className={message.role === 'agent' ? 'chat-bubble agent' : 'chat-bubble user'}>
+                      <strong>{message.role === 'agent' ? 'Irrigator' : 'You'}:</strong> {message.text}
+                    </p>
+                  ))
+                )}
+              </div>
+              <div className="irrigator-chat-input-row">
+                <input
+                  type="text"
+                  value={irrigatorChatInput}
+                  onChange={(event) => setIrrigatorChatInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      handleIrrigatorChatSend();
+                    }
+                  }}
+                  placeholder="Ask: why this decision, rain impact, amount..."
+                />
+                <button type="button" onClick={handleIrrigatorChatSend}>
+                  Send
+                </button>
+              </div>
             </div>
           </section>
         )}

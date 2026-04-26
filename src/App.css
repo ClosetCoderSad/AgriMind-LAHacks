@@ -134,6 +134,222 @@
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 }
 
+.sensor-trend-grid {
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.dashboard-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.dashboard-convai-widget {
+  position: fixed;
+  right: 1.2rem;
+  bottom: 1.2rem;
+  z-index: 1200;
+}
+
+.dashboard-page .card {
+  border-color: #d6e5ff;
+  background: linear-gradient(165deg, #f7fbff 0%, #fdfcff 100%);
+  box-shadow: 0 8px 24px rgba(47, 84, 235, 0.08);
+}
+
+.dashboard-page .pill {
+  background: #e0edff;
+  color: #1d4ed8;
+  border-color: #bfd5ff;
+}
+
+.dashboard-page .status {
+  color: #1e3a8a;
+}
+
+.trend-toolbar {
+  margin-top: 0.95rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.trend-window-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: #eef3ff;
+  border: 1px solid #dbe7ff;
+  border-radius: 999px;
+  padding: 0.25rem;
+}
+
+.trend-toggle,
+.trend-live-btn {
+  border: 1px solid #bfd5ff;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1d4ed8;
+  font-weight: 600;
+  font-size: 0.83rem;
+  padding: 0.35rem 0.72rem;
+  cursor: pointer;
+}
+
+.trend-toggle.active,
+.trend-live-btn.active {
+  background: #1d4ed8;
+  color: #eff6ff;
+  border-color: #1d4ed8;
+}
+
+.trend-card {
+  border: 1px solid #dae6ff;
+  border-radius: 0.85rem;
+  padding: 0.75rem;
+  background: linear-gradient(180deg, #ffffff 0%, #f6f9ff 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+.trend-card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.trend-card-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #1e3a8a;
+}
+
+.trend-card-header strong {
+  font-size: 0.95rem;
+  color: #172554;
+}
+
+.trend-meta {
+  margin: 0.35rem 0 0.45rem;
+  color: #4661a8;
+  font-size: 0.8rem;
+}
+
+.trend-chart-wrap {
+  position: relative;
+}
+
+.trend-chart {
+  width: 100%;
+  height: 96px;
+  border-radius: 0.65rem;
+  background:
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.8), rgba(234, 243, 255, 0.72)),
+    repeating-linear-gradient(
+      to right,
+      rgba(37, 99, 235, 0.1) 0,
+      rgba(37, 99, 235, 0.1) 1px,
+      transparent 1px,
+      transparent 40px
+    );
+  cursor: crosshair;
+}
+
+.trend-chart path {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.trend-chart .trend-area {
+  stroke: none;
+  opacity: 0.2;
+}
+
+.trend-crosshair {
+  stroke: rgba(30, 64, 175, 0.3);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.trend-dot {
+  fill: #ffffff;
+  stroke-width: 2.5;
+}
+
+.trend-card.temperature .trend-chart path {
+  stroke: #f97316;
+}
+
+.trend-card.temperature .trend-chart .trend-area {
+  fill: #f97316;
+}
+
+.trend-card.temperature .trend-dot {
+  stroke: #f97316;
+}
+
+.trend-card.air-quality .trend-chart path {
+  stroke: #6366f1;
+}
+
+.trend-card.air-quality .trend-chart .trend-area {
+  fill: #6366f1;
+}
+
+.trend-card.air-quality .trend-dot {
+  stroke: #6366f1;
+}
+
+.trend-card.moisture .trend-chart path {
+  stroke: #0ea5e9;
+}
+
+.trend-card.moisture .trend-chart .trend-area {
+  fill: #0ea5e9;
+}
+
+.trend-card.moisture .trend-dot {
+  stroke: #0ea5e9;
+}
+
+.trend-card.light .trend-chart path {
+  stroke: #eab308;
+}
+
+.trend-card.light .trend-chart .trend-area {
+  fill: #eab308;
+}
+
+.trend-card.light .trend-dot {
+  stroke: #eab308;
+}
+
+.trend-tooltip {
+  margin-top: 0.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: #344f8d;
+}
+
+.trend-tooltip strong {
+  color: #1e3a8a;
+}
+
+.trend-range {
+  margin: 0.5rem 0 0;
+  color: #1d4ed8;
+  font-size: 0.82rem;
+}
+
 .controls-grid {
   margin-top: 0.8rem;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -532,4 +748,146 @@ select {
   margin: 0.4rem 0 0;
   padding-left: 1.1rem;
   font-size: 0.88rem;
+}
+
+.disease-analysis-page {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.disease-file-input {
+  display: none;
+}
+
+.disease-dropzone {
+  border: 2px dashed #93c5fd;
+  border-radius: 0.9rem;
+  background: linear-gradient(180deg, #eff6ff 0%, #f8fbff 100%);
+  padding: 2rem 1rem;
+  text-align: center;
+  color: #1e3a8a;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+
+.disease-dropzone p {
+  margin: 0;
+  font-weight: 700;
+}
+
+.disease-dropzone span {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.88rem;
+  color: #3730a3;
+}
+
+.disease-dropzone.drag-active {
+  border-color: #2563eb;
+  background: linear-gradient(180deg, #dbeafe 0%, #eff6ff 100%);
+  transform: translateY(-2px);
+}
+
+.disease-preview-card {
+  border: 1px solid #bfdbfe;
+  border-radius: 0.85rem;
+  background: #ffffff;
+  padding: 0.75rem;
+}
+
+.disease-preview-card img {
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border-radius: 0.6rem;
+  border: 1px solid #dbeafe;
+  background: #f8fafc;
+}
+
+.disease-preview-card p {
+  margin: 0.6rem 0 0;
+  color: #1e3a8a;
+}
+
+.irrigator-page {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.irrigator-form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.irrigator-form-grid input {
+  width: 100%;
+  border: 1px solid #bbf7d0;
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+  margin-top: 0.2rem;
+  background: #fff;
+}
+
+.irrigator-chat-widget {
+  margin-top: 0.4rem;
+  border: 1px solid #dcf2e2;
+  border-radius: 0.75rem;
+  background: #f8fff9;
+  padding: 0.75rem;
+}
+
+.irrigator-chat-widget h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.irrigator-chat-log {
+  max-height: 280px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #dcf2e2;
+  border-radius: 0.65rem;
+  padding: 0.6rem;
+}
+
+.chat-bubble {
+  margin: 0 0 0.45rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 0.5rem;
+  font-size: 0.92rem;
+}
+
+.chat-bubble:last-child {
+  margin-bottom: 0;
+}
+
+.chat-bubble.agent {
+  background: #eefbf2;
+  border: 1px solid #bbf7d0;
+}
+
+.chat-bubble.user {
+  background: #ecfeff;
+  border: 1px solid #a5f3fc;
+}
+
+.irrigator-chat-input-row {
+  margin-top: 0.6rem;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+}
+
+.irrigator-chat-input-row input {
+  border: 1px solid #bbf7d0;
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+}
+
+.irrigator-chat-input-row button {
+  border: none;
+  border-radius: 0.55rem;
+  padding: 0.45rem 0.8rem;
+  background: #0d6838;
+  color: #ecfdf5;
+  cursor: pointer;
 }
