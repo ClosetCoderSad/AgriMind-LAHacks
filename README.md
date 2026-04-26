@@ -1,96 +1,218 @@
-# farm
+# AgriMind (LA Hacks 2026)
 
-A Cloudinary React + Vite + TypeScript project scaffolded with [create-cloudinary-react](https://github.com/cloudinary-devs/create-cloudinary-react).
+AgriMind is a React + FastAPI + Fetch.ai multi-agent farming platform with Cloudinary media ingestion and TwelveLabs video intelligence.
 
-## Prerequisites
+This README is the full local runbook: what to put in env files, what to run in each terminal, and how to expose the backend with ngrok for webhooks/agent demos.
 
-- **Node.js** — use a current LTS release. Supported ranges are listed under `engines` in this `package.json`.
+## 1) Prerequisites
 
-## Quick Start
+- Node.js (see `engines` in `package.json`; Node 20+ recommended)
+- Python 3.10+ (3.11 recommended)
+- `pip`
+- ngrok (optional, required for public webhook/tunnel demos)
 
-```bash
+## 2) Install dependencies
+
+From repo root:
+
+```powershell
+cd C:\Users\ahnaf\Downloads\farm-master\farm-master
+npm install
+```
+
+Create + activate Python venv, then install backend deps:
+
+```powershell
+python -m venv .regenv
+.\.regenv\Scripts\Activate.ps1
+pip install -r backend\requirements.txt
+```
+
+If you run the classifier API separately, also install:
+
+```powershell
+pip install torch torchvision pillow fastapi uvicorn python-multipart
+```
+
+## 3) Environment variables (API keys + config)
+
+Do not commit secrets. Keep real values only in local `.env` files.
+
+### Frontend env (`.env` at repo root)
+
+Used by React/Vite:
+
+```env
+VITE_API_BASE_URL=http://127.0.0.1:8000
+VITE_CLOUDINARY_CLOUD_NAME=your_cloud_name
+VITE_CLOUDINARY_UPLOAD_PRESET=your_unsigned_upload_preset
+VITE_CLASSIFIER_API_URL=http://127.0.0.1:8010
+
+# Optional Auth0
+VITE_AUTH0_DOMAIN=
+VITE_AUTH0_CLIENT_ID=
+```
+
+### Backend env (`backend/.env`)
+
+Used by FastAPI + agents:
+
+```env
+# Core backend
+CORS_ORIGIN=http://localhost:5173
+SQLITE_PATH=backend/storage/agrimind.db
+
+# Cloudinary
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_cloudinary_api_key
+CLOUDINARY_API_SECRET=your_cloudinary_api_secret
+CLOUDINARY_INGEST_UPLOAD_PRESET=your_unsigned_upload_preset
+CLOUDINARY_WEBHOOK_SKIP_VERIFY=false
+CLOUDINARY_WEBHOOK_MAX_AGE_SEC=7200
+
+# TwelveLabs
+TWELVELABS_ENABLED=true
+TWELVELABS_API_KEY=your_twelvelabs_api_key
+TWELVELABS_INDEX_ID=your_twelvelabs_index_id
+TWELVELABS_POLL_INTERVAL_SEC=5
+TWELVELABS_MAX_POLL_ATTEMPTS=30
+
+# Agent + public API base for orchestrator tools
+AGRIMIND_API_BASE=http://127.0.0.1:8000
+ORCHESTRATOR_SEED_PHRASE=replace_with_unique_random_string
+ORCHESTRATOR_PORT=8010
+HEALTH_SEED_PHRASE=replace_with_unique_random_string
+HEALTH_AGENT_PORT=8011
+IRRIGATION_SEED_PHRASE=replace_with_unique_random_string
+IRRIGATION_AGENT_PORT=8012
+SUSTAINABILITY_SEED_PHRASE=replace_with_unique_random_string
+SUSTAINABILITY_AGENT_PORT=8013
+ENABLE_MAILBOX=true
+PUBLISH_AGENT_DETAILS=true
+
+# Optional local Gemma-style explanation endpoint
+GEMMA_API_URL=
+GEMMA_API_KEY=
+```
+
+## 4) Terminal-by-terminal startup (recommended)
+
+Open all terminals in:
+
+`C:\Users\ahnaf\Downloads\farm-master\farm-master`
+
+### Terminal 1 - Frontend (Vite)
+
+```powershell
 npm run dev
 ```
 
-## Backend + Agent Setup (Phase 1)
+Expected: frontend at `http://localhost:5173`
 
-AgriMind now includes a Python backend in `backend/` with FastAPI endpoints and Fetch.ai-compatible agent files.
+### Terminal 2 - Backend API (FastAPI main.py)
 
-1. Create and activate a Python virtual environment.
-2. Install backend dependencies:
+Preferred explicit command:
 
-```bash
-pip install -r backend/requirements.txt
+```powershell
+python -m uvicorn backend.app.main:app --app-dir "C:\Users\ahnaf\Downloads\farm-master\farm-master" --host 127.0.0.1 --port 8000 --reload
 ```
 
-3. Copy env template and fill seed phrases:
+Equivalent npm script:
 
-```bash
-copy backend/.env.example backend/.env
-```
-
-4. Start backend API:
-
-```bash
+```powershell
 npm run dev:backend
 ```
 
-5. Start frontend:
+Expected: API at `http://127.0.0.1:8000` and health at `/api/health`
 
-```bash
-npm run dev
+### Terminal 3 - Orchestrator agent (orchestrator.py)
+
+Use module mode (import-safe):
+
+```powershell
+python -m backend.agents.orchestrator_agent
 ```
 
-6. Optional: run agents in separate terminals:
+### Terminal 4 - ngrok tunnel (optional but recommended for demos)
 
-```bash
-npm run agent:orchestrator
-npm run agent:health
-npm run agent:irrigation
-npm run agent:sustainability
+```powershell
+ngrok http 8000
 ```
 
-Set `VITE_API_BASE_URL` in your frontend `.env` if your backend does not run on `http://localhost:8000`.
+Copy the generated HTTPS forwarding URL (example: `https://xxxx.ngrok-free.app`).
 
-## Cloudinary Setup
+Then update:
 
-This project uses Cloudinary for image management. If you don't have a Cloudinary account yet:
+- root `.env`: `VITE_API_BASE_URL=https://xxxx.ngrok-free.app` (if frontend should call tunneled backend)
+- `backend/.env`: `AGRIMIND_API_BASE=https://xxxx.ngrok-free.app` (for orchestrator Cloudinary tools)
+- Cloudinary notification URL: `https://xxxx.ngrok-free.app/api/cloudinary/webhook`
 
-- [Sign up for free](https://cld.media/reactregister)
-- Find your cloud name in your [dashboard](https://console.cloudinary.com/app/home/dashboard)
+Restart frontend/backend/agent after env changes.
 
-## Environment Variables
+### Optional terminals - Other agents
 
-Your `.env` file has been pre-configured with:
+```powershell
+python -m backend.agents.health_agent
+python -m backend.agents.irrigation_agent
+python -m backend.agents.sustainability_agent
+```
 
-- `VITE_CLOUDINARY_CLOUD_NAME`: dafeglj6d
-- `VITE_CLOUDINARY_UPLOAD_PRESET`: y
+### Optional terminal - Classifier service
 
-**Note**: Transformations work without an upload preset (using sample images). Uploads require an unsigned upload preset.
+```powershell
+python classification-model\leaf_disease_classifier.py --serve --host 127.0.0.1 --port 8010
+```
 
-To create an unsigned upload preset:
+If running this, keep `VITE_CLASSIFIER_API_URL=http://127.0.0.1:8010`.
 
-1. Go to https://console.cloudinary.com/app/settings/upload/presets
-2. Click "Add upload preset"
-3. Set it to "Unsigned" mode
-4. Add the preset name to your `.env` file
-5. **Save** the `.env` file and restart the dev server so the new values load correctly.
+## 5) Sanity checks after startup
 
-### Webhook + event-driven analysis (AgriMind backend)
+- Frontend loads at `http://localhost:5173`
+- Backend health works:
 
-- Point Cloudinary’s **Notification URL** (or upload preset) at `POST /api/cloudinary/webhook` on your public API base.
-- Set `CLOUDINARY_API_SECRET` and keep `CLOUDINARY_WEBHOOK_SKIP_VERIFY=false` in production; use skip-verify only for local tests.
-- For **ASI:One**, the orchestrator tool `agri.cloudinary_latest` calls `GET /api/cloudinary/latest` — set `AGRIMIND_API_BASE` to your API URL in the agent environment.
-- Full steps and submission notes: [docs/CLOUDINARY_WEBHOOK_AND_SUBMISSIONS.md](docs/CLOUDINARY_WEBHOOK_AND_SUBMISSIONS.md)
+```powershell
+curl http://127.0.0.1:8000/api/health
+```
 
-## AI Assistant Support
+- TwelveLabs page can:
+  - ingest a public video URL
+  - load index videos
+  - run summary + Q&A
+- Cloudinary upload works and `/api/cloudinary/latest` returns data after webhook events
 
-This project includes AI coding rules for your selected AI assistant(s). The rules help AI assistants understand Cloudinary React SDK patterns, common errors, and best practices.
+## 6) ASI:One / Fetch.ai tool-call notes
 
-**Try the AI Prompts**: Check out the "🤖 Try Asking Your AI Assistant" section in the app for ready-to-use Cloudinary prompts! Copy and paste them into your AI assistant to get started.
+Orchestrator supports these tool names:
 
-## Learn More
+- `twelvelabs.ingest_video`
+- `twelvelabs.summarize_video`
+- `twelvelabs.ask_video`
+- `twelvelabs.analyze_video`
+- `agri.cloudinary_latest`
+- `agri.cloudinary_analyze_uri`
 
-- [Cloudinary React SDK Docs](https://cloudinary.com/documentation/react_integration)
-- [Vite Documentation](https://vite.dev)
-- [React Documentation](https://react.dev)
+Payload shape:
+
+```json
+{
+  "tool": "twelvelabs.analyze_video",
+  "args": {
+    "video_id": "your_video_id"
+  }
+}
+```
+
+## 7) Common issues
+
+- **Import errors when starting orchestrator**: run `python -m backend.agents.orchestrator_agent` (not file path execution).
+- **CORS blocked in browser**: set `CORS_ORIGIN` to your frontend origin and restart backend.
+- **Cloudinary webhook 403**: verify `CLOUDINARY_API_SECRET`; use `CLOUDINARY_WEBHOOK_SKIP_VERIFY=true` only for local debugging.
+- **No TwelveLabs output**: verify `TWELVELABS_ENABLED=true`, valid `TWELVELABS_API_KEY`, and correct `TWELVELABS_INDEX_ID`.
+- **Agent can’t fetch latest Cloudinary event**: ensure `AGRIMIND_API_BASE` points to reachable backend URL.
+
+## 8) Reference docs
+
+- Cloudinary webhook + submissions: [docs/CLOUDINARY_WEBHOOK_AND_SUBMISSIONS.md](docs/CLOUDINARY_WEBHOOK_AND_SUBMISSIONS.md)
+- Cloudinary React SDK: [cloudinary.com/documentation/react_integration](https://cloudinary.com/documentation/react_integration)
+- Vite docs: [vite.dev](https://vite.dev)
+
