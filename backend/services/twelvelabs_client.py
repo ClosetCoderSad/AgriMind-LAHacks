@@ -226,14 +226,33 @@ class TwelveLabsClientService:
                 video_id = self._obj_id(item)
                 if not video_id:
                     continue
+                filename = self._obj_attr(item, "filename", "name")
+                duration = float(self._obj_attr(item, "duration") or 0) or None
+                created_at = self._obj_attr(item, "created_at")
+                stream_url = self._extract_stream_url(item)
+
+                # Many SDK list responses omit streaming fields; retrieve details per video as fallback.
+                if not stream_url:
+                    try:
+                        details = client.indexes.videos.retrieve(resolved_index_id, video_id)
+                        stream_url = self._extract_stream_url(details)
+                        if not filename:
+                            filename = self._obj_attr(details, "filename", "name")
+                        if not duration:
+                            duration = float(self._obj_attr(details, "duration") or 0) or None
+                        if not created_at:
+                            created_at = self._obj_attr(details, "created_at")
+                    except Exception:
+                        pass
+
                 videos.append(
                     TwelveLabsVideoRef(
                         video_id=video_id,
                         index_id=resolved_index_id,
-                        filename=self._obj_attr(item, "filename", "name"),
-                        duration=float(self._obj_attr(item, "duration") or 0) or None,
-                        created_at=self._obj_attr(item, "created_at"),
-                        stream_url=self._extract_stream_url(item),
+                        filename=filename,
+                        duration=duration,
+                        created_at=created_at,
+                        stream_url=stream_url,
                     )
                 )
             return videos, None

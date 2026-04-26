@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getTwelvelabsHistory,
   getTwelvelabsIndexVideos,
@@ -37,6 +37,14 @@ interface DiagnosisResult {
   confidence: number;
   urgency: 'low' | 'medium' | 'high';
   actions: string[];
+}
+
+interface ParsedFarmSegment {
+  startLabel: string;
+  endLabel: string;
+  title: string;
+  startSec: number;
+  endSec: number;
 }
 
 type AppPage = 'dashboard' | 'twelvelabs' | 'cloudinary';
@@ -166,6 +174,41 @@ function getWateringRecommendation(
   };
 }
 
+function parseTimestampToSeconds(value: string): number {
+  const [mm, ss] = value.split(':').map((v) => Number(v));
+  if (Number.isNaN(mm) || Number.isNaN(ss)) {
+    return 0;
+  }
+  return mm * 60 + ss;
+}
+
+function parseFarmSegments(text: string): ParsedFarmSegment[] {
+  const rows = text.split('\n');
+  const segments: ParsedFarmSegment[] = [];
+  const re = /^\[(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})\]\s*(.+)$/;
+
+  for (const row of rows) {
+    const match = row.trim().match(re);
+    if (!match) {
+      continue;
+    }
+    const startLabel = match[1];
+    const endLabel = match[2];
+    const title = match[3];
+    const startSec = parseTimestampToSeconds(startLabel);
+    const endSec = parseTimestampToSeconds(endLabel);
+    segments.push({
+      startLabel,
+      endLabel,
+      title,
+      startSec,
+      endSec: endSec > startSec ? endSec : startSec + 5,
+    });
+  }
+
+  return segments;
+}
+
 function App() {
   const getPageFromPath = (): AppPage => {
     const p = window.location.pathname;
@@ -189,6 +232,7 @@ function App() {
   const [agentMode, setAgentMode] = useState<'local' | 'backend'>('backend');
   const [isDeciding, setIsDeciding] = useState(false);
   const [videoUrlInput, setVideoUrlInput] = useState('');
+  const [lastIngestedSourceUrl, setLastIngestedSourceUrl] = useState('');
   const [isIngestingVideo, setIsIngestingVideo] = useState(false);
   const [lastIngestionResult, setLastIngestionResult] = useState<TwelvelabsIngestionResultApi | null>(null);
   const [twelvelabsHistory, setTwelvelabsHistory] = useState<TwelvelabsHistoryItemApi[]>([]);
@@ -201,6 +245,9 @@ function App() {
   const [videoQuestion, setVideoQuestion] = useState('');
   const [qnaOutput, setQnaOutput] = useState('');
   const [isAskingQna, setIsAskingQna] = useState(false);
+  const [farmSegmentsOutput, setFarmSegmentsOutput] = useState('');
+  const [isGeneratingFarmSegments, setIsGeneratingFarmSegments] = useState(false);
+  const [activeSegmentEndSec, setActiveSegmentEndSec] = useState<number | null>(null);
   const [isLoadingIndexVideos, setIsLoadingIndexVideos] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [uploadMessage, setUploadMessage] = useState('');
@@ -210,6 +257,7 @@ function App() {
   const [isLoadingCloudinary, setIsLoadingCloudinary] = useState(false);
   const [cloudinaryLastUpload, setCloudinaryLastUpload] = useState<CloudinaryUploadResult | null>(null);
   const [isRunningLocalCloudinary, setIsRunningLocalCloudinary] = useState(false);
+  const indexedPreviewVideoRef = useRef<HTMLVideoElement | null>(null);
 
   const cloudinaryWidgetOptions = useMemo(
     () => ({
@@ -308,11 +356,13 @@ function App() {
 
     setIsIngestingVideo(true);
     try {
+      const sourceUrl = videoUrlInput.trim();
       const result = await ingestVideoToTwelvelabs({
-        videoUrl: videoUrlInput.trim(),
+        videoUrl: sourceUrl,
         sourceKey: latestUpload?.public_id,
       });
       setLastIngestionResult(result);
+      setLastIngestedSourceUrl(sourceUrl);
       if (result.video_id) {
         setSelectedVideoId(result.video_id);
       }
@@ -382,6 +432,33 @@ function App() {
       setUploadMessage(message);
     } finally {
       setIsAskingQna(false);
+    }
+  };
+
+  const handleGenerateFarmSegments = async () => {
+    if (!selectedVideoId) {
+      setUploadMessage('Select a video from index before generating farm risk segments.');
+      return;
+    }
+
+    setIsGeneratingFarmSegments(true);
+    setFarmSegmentsOutput('');
+    try {
+      const result = await askIndexedVideoQuestion({
+        videoId: selectedVideoId,
+        question:
+          'Break down this video into important time segments for agriculture operations. Focus on machine failure, crop damage, pest pressure, irrigation system issues, nutrient stress signs, labor safety hazards, and water wastage. Return in this format:\n[MM:SS - MM:SS] Segment title\n- Why it matters\n- Recommended action',
+      });
+      if (result.status === 'ready') {
+        setFarmSegmentsOutput(result.text || 'No segment breakdown returned.');
+      } else {
+        setUploadMessage(`Farm segment breakdown failed: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to generate farm segment breakdown.';
+      setUploadMessage(message);
+    } finally {
+      setIsGeneratingFarmSegments(false);
     }
   };
 
@@ -491,6 +568,40 @@ function App() {
           note: agentDecision.irrigation.rationale,
         }
       : watering;
+
+  const selectedIndexedVideo = useMemo(
+    () => indexedVideos.find((video) => video.video_id === selectedVideoId) || null,
+    [indexedVideos, selectedVideoId]
+  );
+  const previewVideoUrl =
+    selectedIndexedVideo?.stream_url ||
+    (lastIngestionResult?.video_id === selectedVideoId
+      ? lastIngestionResult?.stream_url || lastIngestedSourceUrl
+      : null);
+  const parsedFarmSegments = useMemo(() => parseFarmSegments(farmSegmentsOutput), [farmSegmentsOutput]);
+
+  const handlePlayFarmSegment = (segment: ParsedFarmSegment) => {
+    const video = indexedPreviewVideoRef.current;
+    if (!video || !previewVideoUrl) {
+      setUploadMessage('Preview video is not available. Select a video with preview URL first.');
+      return;
+    }
+
+    video.currentTime = segment.startSec;
+    void video.play();
+    setActiveSegmentEndSec(segment.endSec);
+  };
+
+  const handlePreviewTimeUpdate = () => {
+    const video = indexedPreviewVideoRef.current;
+    if (!video || activeSegmentEndSec === null) {
+      return;
+    }
+    if (video.currentTime >= activeSegmentEndSec) {
+      video.pause();
+      setActiveSegmentEndSec(null);
+    }
+  };
 
   return (
     <div className="app">
@@ -847,6 +958,20 @@ function App() {
                 </select>
               </label>
 
+              <div className="video-preview-panel">
+                <h4>Indexed Video Preview</h4>
+                {!selectedVideoId ? (
+                  <p>Select an indexed video to preview it here.</p>
+                ) : previewVideoUrl ? (
+                  <video ref={indexedPreviewVideoRef} src={previewVideoUrl} controls onTimeUpdate={handlePreviewTimeUpdate} />
+                ) : (
+                  <p>
+                    No stream preview URL available for this video yet. Re-ingest with streaming enabled or pick another
+                    indexed video.
+                  </p>
+                )}
+              </div>
+
               <div className="summary-controls">
                 <label>
                   Summary type
@@ -872,6 +997,39 @@ function App() {
                 </button>
 
                 {summaryOutput && <p className="text-output">{summaryOutput}</p>}
+              </div>
+
+              <div className="summary-controls">
+                <button
+                  type="button"
+                  onClick={() => void handleGenerateFarmSegments()}
+                  disabled={isGeneratingFarmSegments}
+                >
+                  {isGeneratingFarmSegments ? 'Breaking into farm segments...' : 'Generate Farm Risk Segments'}
+                </button>
+                {farmSegmentsOutput && <p className="text-output">{farmSegmentsOutput}</p>}
+                {parsedFarmSegments.length > 0 && (
+                  <div className="segment-preview-list">
+                    <h4>Segment Previews</h4>
+                    {parsedFarmSegments.map((segment) => (
+                      <div key={`${segment.startLabel}-${segment.endLabel}-${segment.title}`} className="segment-preview-row">
+                        <div>
+                          <strong>
+                            [{segment.startLabel} - {segment.endLabel}]
+                          </strong>{' '}
+                          {segment.title}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handlePlayFarmSegment(segment)}
+                          disabled={!previewVideoUrl}
+                        >
+                          Play Segment
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="qna-controls">

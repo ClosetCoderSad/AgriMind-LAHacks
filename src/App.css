@@ -330,6 +330,64 @@ select {
   font-size: 1rem;
 }
 
+.video-preview-panel {
+  background: #ffffff;
+  border: 1px solid #dcf2e2;
+  border-radius: 0.65rem;
+  padding: 0.65rem;
+}
+
+.video-preview-panel h4 {
+  margin: 0 0 0.5rem;
+  color: #14532d;
+  font-size: 0.95rem;
+}
+
+.video-preview-panel p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #166534;
+}
+
+.video-preview-panel video {
+  width: 100%;
+  max-height: 280px;
+  border-radius: 0.5rem;
+  background: #f1f5f9;
+}
+
+.segment-preview-list {
+  margin-top: 0.35rem;
+  background: #ffffff;
+  border: 1px solid #dcf2e2;
+  border-radius: 0.6rem;
+  padding: 0.65rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.segment-preview-list h4 {
+  margin: 0 0 0.25rem;
+  font-size: 0.92rem;
+  color: #14532d;
+}
+
+.segment-preview-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border: 1px solid #dcf2e2;
+  border-radius: 0.5rem;
+  background: #f8fff9;
+  padding: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.segment-preview-row button {
+  white-space: nowrap;
+}
+
 .video-insight-panel input,
 .video-insight-panel select {
   width: 100%;
