@@ -1,0 +1,63 @@
+Raspberry Pi Robot Wiring Pinout (BCM)
+======================================
+
+Assumptions
+-----------
+1) Motors use L298N driver.
+2) Grove sensors use Grove Base HAT for Raspberry Pi (I2C + analog channels).
+3) Logitech camera is USB.
+4) SenseCAP Indicator is USB serial (default /dev/ttyACM0).
+
+
+L298N <-> Raspberry Pi
+----------------------
+L298N ENA  -> GPIO18 (PWM, BCM 18, physical pin 12)
+L298N IN1  -> GPIO17 (BCM 17, physical pin 11)
+L298N IN2  -> GPIO27 (BCM 27, physical pin 13)
+
+L298N ENB  -> GPIO13 (PWM, BCM 13, physical pin 33)
+L298N IN3  -> GPIO23 (BCM 23, physical pin 16)
+L298N IN4  -> GPIO24 (BCM 24, physical pin 18)
+
+L298N GND  -> Pi GND (e.g., physical pin 6)
+
+Motor power:
+- L298N +12V / VIN -> external battery + (appropriate for your TT motors, often 6-12V)
+- L298N GND -> battery - AND Pi GND common ground
+
+Do NOT power motors from Pi 5V pin directly.
+
+
+Grove Sensors via Base HAT
+--------------------------
+Grove Light Sensor        -> A0
+Grove Temperature Sensor  -> A1
+Grove Moisture Sensor     -> A2
+Grove Air Quality Sensor  -> A3
+
+Base HAT sits on Pi GPIO header; no separate pin wiring needed beyond plugging sensors.
+
+
+Logitech Camera
+---------------
+Plug into Raspberry Pi USB port.
+Set CAMERA_INDEX in config.py (usually 0).
+
+
+SenseCAP Indicator
+------------------
+Connect by USB-C/USB data cable to Pi.
+Default serial port configured: /dev/ttyACM0
+If different, update SENSECAP_SERIAL_PORT in config.py
+
+Check with:
+  ls /dev/ttyACM* /dev/ttyUSB*
+
+
+Calibration Locations
+---------------------
+Open config.py and tune:
+- MOTOR_* pins, speeds, and trims
+- MOISTURE_RAW_DRY / MOISTURE_RAW_WET
+- TEMP_OFFSET_C, LIGHT_GAIN/OFFSET, AIR thresholds
+- LOOP_INTERVAL_SECONDS and AUTO_CAPTURE_EVERY_N_LOOPS

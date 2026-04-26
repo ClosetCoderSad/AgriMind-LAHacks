@@ -1,3 +1,26 @@
+Metadata-Version: 2.4
+Name: agrimind
+Version: 0.1.0
+Summary: Farm robot crop health pipeline using VLM + Gemma 4
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: pydantic>=2.7.0
+Requires-Dist: numpy>=1.26.0
+Requires-Dist: pillow>=10.3.0
+Requires-Dist: opencv-python>=4.10.0.84
+Requires-Dist: torch>=2.2.0
+Requires-Dist: torchvision>=0.17.0
+Requires-Dist: transformers>=4.50.0
+Requires-Dist: datasets>=2.20.0
+Requires-Dist: accelerate>=0.33.0
+Requires-Dist: peft>=0.13.0
+Requires-Dist: bitsandbytes>=0.43.0
+Requires-Dist: uvicorn>=0.30.0
+Requires-Dist: fastapi>=0.112.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.2.0; extra == "dev"
+Requires-Dist: ruff>=0.6.0; extra == "dev"
+
 # AgriMind
 
 AgriMind is a hackathon-ready crop health pipeline for a farm robot:
@@ -12,22 +35,14 @@ AgriMind is a hackathon-ready crop health pipeline for a farm robot:
    - `python -m venv .venv`
    - `source .venv/bin/activate`
    - `pip install -e .[dev]`
-2. Start local Ollama for Gemma text inference:
-   - `ollama serve`
-   - `ollama pull gemma3:4b`
-   - `export GEMMA4_OLLAMA_MODEL=gemma3:4b`
-   - `export OLLAMA_URL=http://127.0.0.1:11434`
+2. Define your model path:
+   - `export GEMMA4_MODEL_ID=google/gemma-3-4b-it`
 3. Prepare datasets:
    - `python scripts/prepare_datasets.py --out data/processed`
 4. Train baseline (PaliGemma LoRA):
    - `python scripts/train_paligemma_lora.py --train-json data/processed/train.jsonl --val-json data/processed/val.jsonl`
 5. Run local API:
-   - `export VLM_MODEL_DIR=artifacts/paligemma-lora-fast`
-   - `export VLM_LABEL_SOURCE=data/processed/train.jsonl`
-   - `export VLM_LOW_CONFIDENCE_THRESHOLD=0.4`
    - `uvicorn agrimind.api:app --host 0.0.0.0 --port 8000`
-   - Pi can send multipart uploads to `POST /analyze_upload` (image + sensor fields)
-   - Each processed result is saved automatically as `.pkl` in `data/results_pkl/`
 6. Run simulated end-to-end demo:
    - `python scripts/run_demo.py --input-image sample.jpg`
 
@@ -43,6 +58,5 @@ AgriMind is a hackathon-ready crop health pipeline for a farm robot:
 
 ## Notes
 
-- Gemma text inference is configured via local Ollama (`GEMMA4_OLLAMA_MODEL`).
+- The default Gemma model ID in the quick start is a placeholder if Gemma 4 artifacts are private or renamed.
 - You can swap in another VLM by replacing the model identifier and data collator in the training script.
-- For crop-aware ranking, pass `metadata.crop_type` in `/analyze` requests (example: `apple`, `tomato`).

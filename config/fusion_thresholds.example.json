@@ -1,0 +1,7 @@
+{
+  "dry_moisture_pct": 25.0,
+  "wet_moisture_pct": 80.0,
+  "heat_temperature_c": 33.0,
+  "low_light_lux": 8000.0,
+  "bad_air_quality_index": 150.0
+}

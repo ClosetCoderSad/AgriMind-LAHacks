@@ -1,0 +1,2 @@
+"""AgriMind package."""
+
