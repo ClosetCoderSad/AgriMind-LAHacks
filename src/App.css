@@ -5,6 +5,237 @@
   color: #11231b;
 }
 
+.landing-page {
+  min-height: 100vh;
+  background: #0f2f1e;
+  color: #f8fff9;
+  padding: 1rem;
+}
+
+.landing-nav {
+  width: 100%;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 1rem;
+  border-radius: 0;
+  background: rgba(13, 34, 24, 0.9);
+  border: 1px solid rgba(167, 243, 208, 0.2);
+}
+
+.landing-brand {
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.landing-links {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.landing-link {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0.45rem 0.85rem;
+  background: transparent;
+  color: #d1fae5;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.landing-link:hover {
+  border-color: rgba(167, 243, 208, 0.5);
+}
+
+.landing-signup {
+  border: none;
+  border-radius: 999px;
+  padding: 0.5rem 1rem;
+  background: #fcd34d;
+  color: #1f2937;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.account-dropdown {
+  position: relative;
+}
+
+.landing-account {
+  border: none;
+  border-radius: 999px;
+  padding: 0.5rem 1rem;
+  background: #d1fae5;
+  color: #1f2937;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid #dcf2e2;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 18px rgba(16, 24, 40, 0.1);
+  z-index: 10;
+  min-width: 120px;
+}
+
+.dropdown-item {
+  width: 100%;
+  border: none;
+  padding: 0.5rem 1rem;
+  background: transparent;
+  color: #14532d;
+  cursor: pointer;
+  text-align: left;
+}
+
+.dropdown-item:hover {
+  background: #f8fff9;
+}
+
+.landing-hero {
+  position: relative;
+  width: 100%;
+  min-height: 520px;
+  margin: 0;
+  border-radius: 0;
+  overflow: hidden;
+  border: none;
+  background: linear-gradient(120deg, rgba(20, 83, 45, 0.75), rgba(0, 0, 0, 0.2)),
+    url('https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1800&q=80')
+      center / cover no-repeat;
+}
+
+.landing-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(11, 42, 26, 0.82) 0%,
+    rgba(11, 42, 26, 0.3) 52%,
+    rgba(11, 42, 26, 0.15) 100%
+  );
+}
+
+.landing-content {
+  position: relative;
+  z-index: 1;
+  max-width: 520px;
+  padding: 6.5rem 2rem 2rem;
+}
+
+.landing-tag {
+  margin: 0;
+  color: #d1fae5;
+  font-weight: 600;
+}
+
+.landing-content h1 {
+  margin: 0.35rem 0;
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  line-height: 1.1;
+}
+
+.landing-content p {
+  margin: 0.8rem 0 0;
+  color: #ecfdf5;
+}
+
+.landing-cta {
+  margin-top: 1.2rem;
+  border: none;
+  border-radius: 999px;
+  padding: 0.7rem 1.2rem;
+  background: #fcd34d;
+  color: #1f2937;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.landing-stats {
+  padding: 4rem 1rem;
+  background: #f8fff9;
+  color: #11231b;
+}
+
+.stats-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 2rem;
+}
+
+.stat-item {
+  text-align: center;
+  padding: 2rem;
+  background: #ffffff;
+  border: 1px solid #dcf2e2;
+  border-radius: 1rem;
+  box-shadow: 0 4px 18px rgba(16, 24, 40, 0.05);
+}
+
+.stat-item h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.stat-number {
+  margin: 0.5rem 0;
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: #14532d;
+}
+
+.stat-item p {
+  margin: 0;
+  color: #64748b;
+}
+
+.auth-page {
+  min-height: 100vh;
+  background: linear-gradient(180deg, #f2fbf3 0%, #f8fafc 100%);
+  padding: 1rem;
+}
+
+.auth-wrap {
+  max-width: 760px;
+  margin: 2.5rem auto 0;
+}
+
+.auth-card {
+  background: #ffffff;
+  border: 1px solid #dcf2e2;
+  border-radius: 1rem;
+  padding: 1.2rem;
+  box-shadow: 0 4px 18px rgba(16, 24, 40, 0.05);
+}
+
+.auth-card h2 {
+  margin: 0;
+}
+
+.auth-card p {
+  margin: 0.65rem 0 0;
+}
+
+.auth-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
 .layout {
   max-width: 960px;
   margin: 0 auto;
@@ -14,12 +245,25 @@
 
 .app-nav {
   display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 0.5rem;
   background: #ffffff;
   border: 1px solid #dcf2e2;
   border-radius: 1rem;
   padding: 0.6rem;
   box-shadow: 0 4px 18px rgba(16, 24, 40, 0.05);
+}
+
+.app-nav-links {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.nav-signup {
+  margin-left: auto;
 }
 
 .nav-link {
@@ -48,6 +292,16 @@
 .hero h1 {
   margin: 0;
   font-size: 2rem;
+}
+
+.hero-home-link {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  padding: 0;
+  cursor: pointer;
 }
 
 .hero p {
@@ -807,6 +1061,45 @@ select {
 .disease-preview-card p {
   margin: 0.6rem 0 0;
   color: #1e3a8a;
+}
+
+.disease-classify-btn {
+  margin-top: 0.75rem;
+}
+
+.disease-predictions {
+  margin-top: 0.8rem;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  border-radius: 0.7rem;
+  padding: 0.7rem;
+}
+
+.disease-predictions h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #1e3a8a;
+}
+
+.disease-predictions ul {
+  margin: 0.6rem 0 0;
+  padding-left: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.disease-predictions li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  background: #ffffff;
+  border: 1px solid #dbeafe;
+  border-radius: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  color: #1e3a8a;
+  font-size: 0.9rem;
 }
 
 .irrigator-page {

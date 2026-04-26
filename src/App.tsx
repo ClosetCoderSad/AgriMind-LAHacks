@@ -1,4 +1,5 @@
 import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAuth0 } from '@auth0/auth0-react';
 import {
   getTwelvelabsHistory,
   getTwelvelabsIndexVideos,
@@ -82,8 +83,18 @@ interface SensorTrendPoint {
 }
 
 type TrendMetricKey = 'temperatureC' | 'airQuality' | 'moisture' | 'lightLux';
+interface DiseasePredictionItem {
+  rank: number;
+  label: string;
+  confidence: number;
+}
 
 type AppPage = 'dashboard' | 'twelvelabs' | 'cloudinary' | 'diseaseAnalysis' | 'irrigator';
+type AppRoute = 'landing' | 'auth' | AppPage;
+
+interface AppProps {
+  authEnabled?: boolean;
+}
 
 const hasUploadPreset = Boolean(uploadPreset);
 const INITIAL_SENSORS: SensorSnapshot = {
@@ -514,25 +525,33 @@ async function fetchRainExpected(latitude: number, longitude: number): Promise<{
   };
 }
 
-function App() {
-  const getPageFromPath = (): AppPage => {
-    const p = window.location.pathname;
-    if (p === '/twelvelabs' || p.startsWith('/twelvelabs/')) {
-      return 'twelvelabs';
-    }
-    if (p === '/cloudinary' || p.startsWith('/cloudinary/')) {
-      return 'cloudinary';
-    }
-    if (p === '/disease-analysis' || p.startsWith('/disease-analysis/')) {
-      return 'diseaseAnalysis';
-    }
-    if (p === '/irrigator' || p.startsWith('/irrigator/')) {
-      return 'irrigator';
-    }
-    return 'dashboard';
-  };
+function getPageFromPath(pathname: string): AppPage {
+  if (pathname === '/twelvelabs' || pathname.startsWith('/twelvelabs/')) {
+    return 'twelvelabs';
+  }
+  if (pathname === '/cloudinary' || pathname.startsWith('/cloudinary/')) {
+    return 'cloudinary';
+  }
+  if (pathname === '/disease-analysis' || pathname.startsWith('/disease-analysis/')) {
+    return 'diseaseAnalysis';
+  }
+  if (pathname === '/irrigator' || pathname.startsWith('/irrigator/')) {
+    return 'irrigator';
+  }
+  return 'dashboard';
+}
 
-  const [activePage, setActivePage] = useState<AppPage>(() => getPageFromPath());
+function getRouteFromPath(pathname: string): AppRoute {
+  if (pathname === '/') {
+    return 'landing';
+  }
+  return getPageFromPath(pathname);
+}
+
+function App({ authEnabled = false }: AppProps) {
+  const { isAuthenticated, user, logout, loginWithRedirect } = useAuth0();
+  const [activeRoute, setActiveRoute] = useState<AppRoute>(() => getRouteFromPath(window.location.pathname));
+  const [activePage, setActivePage] = useState<AppPage>(() => getPageFromPath(window.location.pathname));
   const [sensors, setSensors] = useState<SensorSnapshot>(INITIAL_SENSORS);
   const [cropStage, setCropStage] = useState<CropStage>('vegetative');
   const [rainChance, setRainChance] = useState(35);
@@ -581,8 +600,14 @@ function App() {
   const [diseasePreviewUrl, setDiseasePreviewUrl] = useState('');
   const [diseasePreviewName, setDiseasePreviewName] = useState('');
   const [isDragOverDiseaseDropzone, setIsDragOverDiseaseDropzone] = useState(false);
+  const [diseaseUploadFile, setDiseaseUploadFile] = useState<File | null>(null);
+  const [diseasePredictions, setDiseasePredictions] = useState<DiseasePredictionItem[]>([]);
+  const [isClassifyingDisease, setIsClassifyingDisease] = useState(false);
+  const [diseaseClassificationError, setDiseaseClassificationError] = useState('');
   const indexedPreviewVideoRef = useRef<HTMLVideoElement | null>(null);
   const diseaseFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
+  const classifierApiBase = (import.meta.env.VITE_CLASSIFIER_API_URL as string | undefined)?.trim() || 'http://127.0.0.1:8010';
 
   const cloudinaryWidgetOptions = useMemo(
     () => ({
@@ -849,7 +874,9 @@ function App() {
 
   useEffect(() => {
     const onPopState = () => {
-      setActivePage(getPageFromPath());
+      const pathname = window.location.pathname;
+      setActiveRoute(getRouteFromPath(pathname));
+      setActivePage(getPageFromPath(pathname));
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -895,6 +922,10 @@ function App() {
   }, [diseasePreviewUrl]);
 
   const navigateToPage = (page: AppPage) => {
+    if (authEnabled && !isAuthenticated) {
+      navigateToAuth();
+      return;
+    }
     const targetPath =
       page === 'twelvelabs'
         ? '/twelvelabs'
@@ -908,7 +939,23 @@ function App() {
     if (window.location.pathname !== targetPath) {
       window.history.pushState({}, '', targetPath);
     }
+    setActiveRoute(page);
     setActivePage(page);
+  };
+
+  const navigateToLanding = () => {
+    if (window.location.pathname !== '/') {
+      window.history.pushState({}, '', '/');
+    }
+    setActiveRoute('landing');
+  };
+
+  const navigateToAuth = () => {
+    if (authEnabled) {
+      void loginWithRedirect();
+    } else {
+      navigateToLanding();
+    }
   };
 
   const handleUploadError = (error: Error) => {
@@ -925,6 +972,9 @@ function App() {
     const objectUrl = URL.createObjectURL(file);
     setDiseasePreviewUrl(objectUrl);
     setDiseasePreviewName(file.name);
+    setDiseaseUploadFile(file);
+    setDiseasePredictions([]);
+    setDiseaseClassificationError('');
   };
 
   const handleDiseaseFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -944,6 +994,40 @@ function App() {
       return;
     }
     applyDiseasePreviewFile(file);
+  };
+
+  const handleRunDiseaseClassification = async () => {
+    if (!diseaseUploadFile) {
+      setDiseaseClassificationError('Upload an image first.');
+      return;
+    }
+
+    setIsClassifyingDisease(true);
+    setDiseaseClassificationError('');
+    setDiseasePredictions([]);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', diseaseUploadFile);
+      formData.append('top_k', '3');
+
+      const response = await fetch(`${classifierApiBase}/predict`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = (await response.json()) as { predictions?: DiseasePredictionItem[]; error?: string };
+      if (!response.ok) {
+        throw new Error(data.error || 'Classification API request failed.');
+      }
+      setDiseasePredictions(data.predictions || []);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to classify image.';
+      setDiseaseClassificationError(
+        `${message} Start local service: python classification-model/leaf_disease_classifier.py --serve`
+      );
+    } finally {
+      setIsClassifyingDisease(false);
+    }
   };
 
   const healthScore = useMemo(() => scoreHealth(sensors), [sensors]);
@@ -1091,11 +1175,107 @@ function App() {
     setIrrigatorChat((prev) => [...prev, { role: 'agent', text: answer }]);
   };
 
+  if (activeRoute === 'landing') {
+    return (
+      <div className="landing-page">
+        <header className="landing-nav" aria-label="Landing navigation">
+          <div className="landing-brand">AgriMind</div>
+          <nav className="landing-links">
+            <button type="button" onClick={() => navigateToPage('dashboard')} className="landing-link">
+              Dashboard
+            </button>
+            <button type="button" onClick={() => navigateToPage('twelvelabs')} className="landing-link">
+              TwelveLabs
+            </button>
+            <button type="button" onClick={() => navigateToPage('cloudinary')} className="landing-link">
+              Cloudinary
+            </button>
+            <button type="button" onClick={() => navigateToPage('diseaseAnalysis')} className="landing-link">
+              Disease Analysis
+            </button>
+            <button type="button" onClick={() => navigateToPage('irrigator')} className="landing-link">
+              Irrigator
+            </button>
+          </nav>
+          {authEnabled && isAuthenticated ? (
+            <div className="account-dropdown">
+              <button
+                type="button"
+                className="landing-account"
+                onClick={() => setAccountDropdownOpen(!accountDropdownOpen)}
+              >
+                {user?.name || user?.email || 'Account'}
+              </button>
+              {accountDropdownOpen && (
+                <div className="dropdown-menu">
+                  <button
+                    type="button"
+                    className="dropdown-item"
+                    onClick={() => logout({ logoutParams: { returnTo: window.location.origin } })}
+                  >
+                    Log out
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <button type="button" className="landing-signup" onClick={() => void loginWithRedirect()}>
+              Sign up
+            </button>
+          )}
+        </header>
+
+        <section className="landing-hero">
+          <div className="landing-overlay" />
+          <div className="landing-content">
+            <p className="landing-tag">Smart farming intelligence</p>
+            <h1>AgriMind powers better farm decisions.</h1>
+            <p>
+              Monitor crop health, analyze visual signals, and optimize irrigation from one intelligent platform.
+            </p>
+            <button type="button" className="landing-cta" onClick={() => navigateToPage('dashboard')}>
+              Open Dashboard
+            </button>
+          </div>
+        </section>
+
+        <section className="landing-stats">
+          <div className="stats-container">
+            <div className="stat-item">
+              <h3>Energy Saved</h3>
+              <p className="stat-number">25%</p>
+              <p>Reduced water usage through intelligent irrigation</p>
+            </div>
+            <div className="stat-item">
+              <h3>Crop Yield</h3>
+              <p className="stat-number">+15%</p>
+              <p>Improved health monitoring and decision making</p>
+            </div>
+            <div className="stat-item">
+              <h3>Time Efficiency</h3>
+              <p className="stat-number">50%</p>
+              <p>Automated analysis and recommendations</p>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  if (authEnabled && !isAuthenticated) {
+    void loginWithRedirect();
+    return <div>Redirecting to login...</div>;
+  }
+
   return (
     <div className="app">
       <main className="layout">
         <header className="hero">
-          <h1>AgriMind</h1>
+          <h1>
+            <button type="button" className="hero-home-link" onClick={navigateToLanding}>
+              AgriMind
+            </button>
+          </h1>
           <p>Smart micro-farming assistant for soil health, leaf diagnosis, and watering plans.</p>
         </header>
 
@@ -1134,6 +1314,9 @@ function App() {
             onClick={() => navigateToPage('irrigator')}
           >
             Irrigator
+          </button>
+          <button type="button" className="nav-link nav-signup" onClick={navigateToAuth}>
+            Sign up
           </button>
         </nav>
 
@@ -1883,6 +2066,28 @@ function App() {
                 <p>
                   <strong>Selected file:</strong> {diseasePreviewName}
                 </p>
+                <button
+                  type="button"
+                  className="run-decision-btn disease-classify-btn"
+                  onClick={() => void handleRunDiseaseClassification()}
+                  disabled={isClassifyingDisease}
+                >
+                  {isClassifyingDisease ? 'Classifying...' : 'Run Classification'}
+                </button>
+                {diseaseClassificationError && <p className="warning">{diseaseClassificationError}</p>}
+                {diseasePredictions.length > 0 && (
+                  <div className="disease-predictions">
+                    <h3>Predictions</h3>
+                    <ul>
+                      {diseasePredictions.map((item) => (
+                        <li key={`${item.rank}-${item.label}`}>
+                          <span>{item.rank}. {item.label.replace(/_/g, ' ')}</span>
+                          <strong>{(item.confidence * 100).toFixed(1)}%</strong>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             )}
           </section>
