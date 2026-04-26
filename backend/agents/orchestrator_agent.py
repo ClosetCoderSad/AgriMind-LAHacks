@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import urllib.error
+import urllib.request
 from datetime import datetime
 from uuid import uuid4
 
@@ -34,15 +36,95 @@ protocol = Protocol(spec=chat_protocol_spec)
 
 
 def _json_text(payload: dict) -> str:
-    return json.dumps(payload, ensure_ascii=True)
+    return json.dumps(payload, ensure_ascii=True, indent=2)
+
+
+def _cloudinary_latest_text(result: dict) -> str:
+    lines = [
+        "Cloudinary Latest Analysis",
+        "-------------------------",
+        f"Event ID: {result.get('event_id', 'n/a')}",
+        f"Created At: {result.get('created_at', 'n/a')}",
+        f"Asset: {result.get('asset_public_id', 'n/a')} ({result.get('asset_type', 'n/a')})",
+        f"Status: {result.get('analysis_status', 'n/a')}",
+        f"Summary: {result.get('analysis_summary', 'n/a')}",
+        f"Action: {result.get('recommended_action', 'n/a')}",
+    ]
+
+    risk_labels = result.get("risk_labels") or []
+    lines.append(f"Labels: {', '.join(risk_labels) if risk_labels else 'n/a'}")
+
+    sustainability = result.get("sustainability") or {}
+    if isinstance(sustainability, dict):
+        water = sustainability.get("water_saved_liters_estimate", "n/a")
+        carbon = sustainability.get("carbon_kg_co2e_avoided_estimate", "n/a")
+        trips = sustainability.get("avoided_trip_km_estimate", "n/a")
+        lines.append(f"Impact: water_saved={water}L, carbon_avoided={carbon}kgCO2e, travel_avoided={trips}km")
+        note = sustainability.get("waste_reduction_note")
+        if note:
+            lines.append(f"Waste Note: {note}")
+
+    media = result.get("media_urls") or {}
+    if isinstance(media, dict):
+        lines.append("")
+        lines.append("Media URLs")
+        lines.append(f"- Overlay: {media.get('overlay') or 'n/a'}")
+        lines.append(f"- Preview: {media.get('preview') or 'n/a'}")
+        lines.append(f"- Thumbnail: {media.get('thumbnail') or 'n/a'}")
+        lines.append(f"- Original: {media.get('original') or 'n/a'}")
+
+    return "\n".join(lines)
+
+
+def _tool_output_text(result: dict) -> str:
+    tool = str(result.get("tool", "unknown_tool"))
+    status = str(result.get("status", "unknown"))
+    lines = [f"Tool: {tool}", f"Status: {status}"]
+
+    if result.get("step"):
+        lines.append(f"Step: {result.get('step')}")
+    if result.get("video_id"):
+        lines.append(f"Video ID: {result.get('video_id')}")
+    if result.get("index_id"):
+        lines.append(f"Index ID: {result.get('index_id')}")
+    if result.get("summary"):
+        lines.append(f"Summary: {result.get('summary')}")
+    if result.get("search_reference"):
+        lines.append(f"Search Ref: {result.get('search_reference')}")
+    if result.get("stream_url"):
+        lines.append(f"Stream URL: {result.get('stream_url')}")
+    if result.get("question"):
+        lines.append(f"Question: {result.get('question')}")
+
+    result_text = result.get("result_text")
+    if isinstance(result_text, str) and result_text.strip():
+        lines.append("")
+        lines.append("Analysis")
+        lines.append("--------")
+        lines.append(result_text.strip())
+
+    next_action = result.get("next_action")
+    if isinstance(next_action, str) and next_action.strip():
+        lines.append("")
+        lines.append(f"Next Action: {next_action.strip()}")
+
+    error = result.get("error")
+    if error:
+        lines.append(f"Error: {error}")
+
+    return "\n".join(lines)
 
 
 def _tool_help_text() -> str:
     return (
         "Send JSON with one of these tools: "
-        "twelvelabs.ingest_video, twelvelabs.summarize_video, twelvelabs.ask_video, twelvelabs.analyze_video. "
+        "twelvelabs.ingest_video, twelvelabs.summarize_video, twelvelabs.ask_video, twelvelabs.analyze_video, "
+        "agri.cloudinary_latest. "
+        "agri.cloudinary_latest requires AGRIMIND_API_BASE to point at the FastAPI server and returns the most recent "
+        "Cloudinary webhook + AI analysis (sustainability + transform URLs + TwelveLabs when enabled). "
         "Example: "
-        '{"tool":"twelvelabs.analyze_video","args":{"video_url":"https://.../sample.mp4"}}'
+        '{"tool":"twelvelabs.analyze_video","args":{"video_url":"https://.../sample.mp4"}} '
+        'or {"tool":"agri.cloudinary_latest","args":{}}'
     )
 
 
@@ -98,6 +180,57 @@ def _run_tool(payload: dict) -> dict:
             "question": question,
             "result_text": result.text,
             "error": result.error,
+        }
+
+    if tool_name == "agri.cloudinary_latest":
+        base = (os.getenv("AGRIMIND_API_BASE", "http://127.0.0.1:8000") or "").rstrip("/")
+        url = f"{base}/api/cloudinary/latest"
+        try:
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.URLError as exc:
+            return {
+                "status": "failed",
+                "tool": tool_name,
+                "error": str(exc),
+                "hint": "Set AGRIMIND_API_BASE to your FastAPI public URL; ensure the API is running and /api/cloudinary has received at least one webhook event.",
+            }
+        except Exception as exc:  # pragma: no cover
+            return {"status": "failed", "tool": tool_name, "error": str(exc)}
+        if isinstance(payload, dict) and payload.get("status") == "ok" and isinstance(payload.get("result"), dict):
+            latest = payload.get("result") or {}
+            media_urls = latest.get("transformed_media_urls") or {}
+            clean = {
+                "status": "success",
+                "tool": tool_name,
+                "event_id": payload.get("id"),
+                "created_at": payload.get("created_at"),
+                "asset_public_id": latest.get("public_id"),
+                "asset_type": latest.get("resource_type"),
+                "analysis_status": latest.get("status"),
+                "analysis_summary": latest.get("analysis_summary"),
+                "recommended_action": latest.get("recommended_action"),
+                "risk_labels": latest.get("risk_labels") or [],
+                "sustainability": latest.get("sustainability") or {},
+                "media_urls": {
+                    "overlay": media_urls.get("overlay"),
+                    "preview": media_urls.get("preview"),
+                    "thumbnail": media_urls.get("thumbnail"),
+                    "original": media_urls.get("original_secure_url"),
+                },
+            }
+            return {
+                "status": "success",
+                "tool": tool_name,
+                "format": "text",
+                "text": _cloudinary_latest_text(clean),
+                "data": clean,
+            }
+        return {
+            "status": "success",
+            "tool": tool_name,
+            "result": payload,
         }
 
     if tool_name == "twelvelabs.analyze_video":
@@ -190,7 +323,17 @@ async def handle_message(ctx: Context, sender: str, msg: ChatMessage) -> None:
     try:
         payload = _extract_json_payload(user_text)
         if isinstance(payload, dict) and payload.get("tool"):
-            response_text = _json_text(_run_tool(payload))
+            tool_output = _run_tool(payload)
+            if (
+                isinstance(tool_output, dict)
+                and str(tool_output.get("format", "")).lower() == "text"
+                and isinstance(tool_output.get("text"), str)
+            ):
+                response_text = str(tool_output.get("text"))
+            elif isinstance(tool_output, dict):
+                response_text = _tool_output_text(tool_output)
+            else:
+                response_text = _json_text(tool_output if isinstance(tool_output, dict) else {"status": "failed"})
         elif isinstance(payload, dict):
             request = DecisionRequest.model_validate(payload)
             decision = run_agri_pipeline(request)

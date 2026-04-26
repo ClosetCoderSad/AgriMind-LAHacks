@@ -1,13 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   getTwelvelabsHistory,
   getTwelvelabsIndexVideos,
   getAgentDecision,
   getDecisionExplanation,
+  getCloudinaryEvents,
+  getCloudinaryLatest,
+  runCloudinaryLocalAnalyze,
   ingestVideoToTwelvelabs,
   askIndexedVideoQuestion,
   mapSensorsToApi,
   summarizeIndexedVideo,
+  type CloudinaryEventRowApi,
+  type CloudinaryLatestResponseApi,
   type CropStage,
   type DecisionResponseApi,
   type TwelvelabsHistoryItemApi,
@@ -34,7 +39,7 @@ interface DiagnosisResult {
   actions: string[];
 }
 
-type AppPage = 'dashboard' | 'twelvelabs';
+type AppPage = 'dashboard' | 'twelvelabs' | 'cloudinary';
 
 const hasUploadPreset = Boolean(uploadPreset);
 const INITIAL_SENSORS: SensorSnapshot = {
@@ -163,8 +168,12 @@ function getWateringRecommendation(
 
 function App() {
   const getPageFromPath = (): AppPage => {
-    if (window.location.pathname === '/twelvelabs') {
+    const p = window.location.pathname;
+    if (p === '/twelvelabs' || p.startsWith('/twelvelabs/')) {
       return 'twelvelabs';
+    }
+    if (p === '/cloudinary' || p.startsWith('/cloudinary/')) {
+      return 'cloudinary';
     }
     return 'dashboard';
   };
@@ -195,6 +204,20 @@ function App() {
   const [isLoadingIndexVideos, setIsLoadingIndexVideos] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [uploadMessage, setUploadMessage] = useState('');
+  const [cloudinaryMessage, setCloudinaryMessage] = useState('');
+  const [cloudinaryLatest, setCloudinaryLatest] = useState<CloudinaryLatestResponseApi | null>(null);
+  const [cloudinaryEvents, setCloudinaryEvents] = useState<CloudinaryEventRowApi[]>([]);
+  const [isLoadingCloudinary, setIsLoadingCloudinary] = useState(false);
+  const [cloudinaryLastUpload, setCloudinaryLastUpload] = useState<CloudinaryUploadResult | null>(null);
+  const [isRunningLocalCloudinary, setIsRunningLocalCloudinary] = useState(false);
+
+  const cloudinaryWidgetOptions = useMemo(
+    () => ({
+      tags: ['agrimind-ui'],
+      folder: 'agrimind/web',
+    }),
+    []
+  );
 
   const runDecisionFlow = async (nextUpload?: CloudinaryUploadResult | null) => {
     if (agentMode !== 'backend') {
@@ -362,10 +385,65 @@ function App() {
     }
   };
 
+  const loadCloudinaryData = useCallback(async () => {
+    setIsLoadingCloudinary(true);
+    try {
+      const [latest, events] = await Promise.all([getCloudinaryLatest(), getCloudinaryEvents(15)]);
+      setCloudinaryLatest(latest);
+      setCloudinaryEvents(events);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not load Cloudinary pipeline data.';
+      setCloudinaryMessage(`Error: ${message}`);
+    } finally {
+      setIsLoadingCloudinary(false);
+    }
+  }, []);
+
+  const handleCloudinaryPageUpload = (result: CloudinaryUploadResult) => {
+    setCloudinaryLastUpload(result);
+    setCloudinaryMessage(
+      `Uploaded ${result.resource_type} "${result.public_id}". Configure your upload preset to notify \`POST /api/cloudinary/webhook\`, then wait a few seconds — or use Refresh / auto-refresh.`
+    );
+    let n = 0;
+    const id = window.setInterval(() => {
+      n += 1;
+      void loadCloudinaryData();
+      if (n >= 6) {
+        window.clearInterval(id);
+      }
+    }, 2500);
+  };
+
+  const handleRunLocalCloudinaryAnalysis = async () => {
+    if (!cloudinaryLastUpload) {
+      setCloudinaryMessage('Upload an image/video first, then run local analysis.');
+      return;
+    }
+    setIsRunningLocalCloudinary(true);
+    try {
+      const res = await runCloudinaryLocalAnalyze(cloudinaryLastUpload);
+      setCloudinaryMessage(
+        `Local analysis complete (${res.status}). Stored event for ${res.public_id}.`
+      );
+      await loadCloudinaryData();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Local cloudinary analysis failed.';
+      setCloudinaryMessage(`Error: ${message}`);
+    } finally {
+      setIsRunningLocalCloudinary(false);
+    }
+  };
+
   useEffect(() => {
     void loadTwelvelabsHistory();
     void loadIndexedVideos();
   }, []);
+
+  useEffect(() => {
+    if (activePage === 'cloudinary') {
+      void loadCloudinaryData();
+    }
+  }, [activePage, loadCloudinaryData]);
 
   useEffect(() => {
     const onPopState = () => {
@@ -376,7 +454,8 @@ function App() {
   }, []);
 
   const navigateToPage = (page: AppPage) => {
-    const targetPath = page === 'twelvelabs' ? '/twelvelabs' : '/';
+    const targetPath =
+      page === 'twelvelabs' ? '/twelvelabs' : page === 'cloudinary' ? '/cloudinary' : '/';
     if (window.location.pathname !== targetPath) {
       window.history.pushState({}, '', targetPath);
     }
@@ -435,6 +514,13 @@ function App() {
             onClick={() => navigateToPage('twelvelabs')}
           >
             TwelveLabs
+          </button>
+          <button
+            type="button"
+            className={activePage === 'cloudinary' ? 'nav-link active' : 'nav-link'}
+            onClick={() => navigateToPage('cloudinary')}
+          >
+            Cloudinary
           </button>
         </nav>
 
@@ -822,6 +908,171 @@ function App() {
                     <li key={`${entry.created_at}-${entry.indexed_asset_id || entry.asset_id || entry.status}`}>
                       {entry.created_at} | {entry.status} | index: {entry.index_id || 'n/a'} | indexed asset:{' '}
                       {entry.indexed_asset_id || 'n/a'}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
+        )}
+
+        {activePage === 'cloudinary' && (
+          <section className="card cloudinary-page">
+            <div className="card-title-row">
+              <h2>Cloudinary media pipeline</h2>
+              <span className="pill subtle">Webhooks + transform URLs + backend AI</span>
+            </div>
+
+            <div className="info-callout">
+              <p>
+                <strong>What this tab is for:</strong> upload media to Cloudinary here (same account as the rest of the
+                app). If your Cloudinary <em>upload preset</em> or project sends HTTP notifications to your AgriMind
+                API <code>POST /api/cloudinary/webhook</code>, the server runs the same analysis as the event-driven
+                pipeline and stores <strong>transformation URLs</strong> (thumbnail, preview, text overlay with risk /
+                moisture hints). This is how you get <strong>“annotated” images</strong> for demos: they are
+                Cloudinary delivery URLs with baked-in text layers — not a file attached inside the ASI:One chat.
+              </p>
+              <p>
+                <strong>ASI:One:</strong> the orchestrator tool <code>agri.cloudinary_latest</code> returns{' '}
+                <strong>JSON</strong> that includes those URLs and sustainability text. Chat clients may show the links;
+                for actual images, open the URLs or use this page.
+              </p>
+              <p>
+                <strong>Two different “base URLs”:</strong>{' '}
+                <code>VITE_API_BASE_URL</code> (in the <em>browser</em> .env) points this React app at your FastAPI
+                server for <code>/api/...</code>. <code>AGRIMIND_API_BASE</code> (in the <em>orchestrator agent’s</em>{' '}
+                <code>backend/.env</code>) is only for the uAgent process: it is the same API base the agent uses to
+                call <code>GET /api/cloudinary/latest</code>. If the agent runs on your PC and the API is on localhost,
+                the default <code>http://127.0.0.1:8000</code> is enough. If the agent runs in the cloud, set it to
+                your public API URL.
+              </p>
+            </div>
+
+            {!hasUploadPreset && (
+              <p className="warning">
+                Add <code>VITE_CLOUDINARY_UPLOAD_PRESET</code> so uploads work from this tab.
+              </p>
+            )}
+
+            {hasUploadPreset && (
+              <div className="cloudinary-upload-block">
+                <h3>Upload (image or short video)</h3>
+                <p className="status">
+                  Optional tags/folder: <code>agrimind-ui</code> / <code>agrimind/web</code>. In the Cloudinary
+                  console, set the preset’s <strong>Notification URL</strong> to your public backend{' '}
+                  <code>https://&lt;host&gt;/api/cloudinary/webhook</code> for automatic analysis.
+                </p>
+                <UploadWidget
+                  buttonText="Upload to Cloudinary"
+                  onUploadSuccess={handleCloudinaryPageUpload}
+                  onUploadError={(err) => setCloudinaryMessage(`Upload error: ${err.message}`)}
+                  className="cloudinary-upload-btn"
+                  widgetOptions={cloudinaryWidgetOptions}
+                />
+                <button
+                  type="button"
+                  className="nav-link"
+                  onClick={() => void handleRunLocalCloudinaryAnalysis()}
+                  disabled={isRunningLocalCloudinary || !cloudinaryLastUpload}
+                  style={{ marginLeft: '0.6rem', cursor: isRunningLocalCloudinary ? 'wait' : 'pointer' }}
+                >
+                  {isRunningLocalCloudinary ? 'Running local analysis…' : 'Run local analysis now (no webhook)'}
+                </button>
+              </div>
+            )}
+
+            {cloudinaryMessage && <p className="status cloudinary-inline-msg">{cloudinaryMessage}</p>}
+
+            <div className="card-title-row cloudinary-toolbar">
+              <h3>Latest webhook result</h3>
+              <button
+                type="button"
+                onClick={() => void loadCloudinaryData()}
+                disabled={isLoadingCloudinary}
+                className="nav-link"
+                style={{ cursor: isLoadingCloudinary ? 'wait' : 'pointer' }}
+              >
+                {isLoadingCloudinary ? 'Loading…' : 'Refresh from API'}
+              </button>
+            </div>
+
+            {cloudinaryLatest && cloudinaryLatest.status === 'empty' && (
+              <p className="status">No events yet. After a successful webhook, results appear here (and in ASI:One via the tool).</p>
+            )}
+
+            {cloudinaryLatest && cloudinaryLatest.status === 'ok' && (
+              <div className="cloudinary-latest-panel">
+                <p className="status">
+                  <strong>Event #{cloudinaryLatest.id}</strong> · {cloudinaryLatest.created_at} · status:{' '}
+                  <strong>{cloudinaryLatest.result.status}</strong>
+                </p>
+                <p>
+                  <strong>Summary:</strong> {cloudinaryLatest.result.analysis_summary}
+                </p>
+                {cloudinaryLatest.result.recommended_action && (
+                  <p>
+                    <strong>Action:</strong> {cloudinaryLatest.result.recommended_action}
+                  </p>
+                )}
+                {cloudinaryLatest.result.risk_labels && cloudinaryLatest.result.risk_labels.length > 0 && (
+                  <p>
+                    <strong>Labels:</strong> {cloudinaryLatest.result.risk_labels.join(' · ')}
+                  </p>
+                )}
+                {cloudinaryLatest.result.sustainability && Object.keys(cloudinaryLatest.result.sustainability).length > 0 && (
+                  <p>
+                    <strong>Sustainability:</strong>{' '}
+                    {JSON.stringify(cloudinaryLatest.result.sustainability)}
+                  </p>
+                )}
+                {cloudinaryLatest.result.video_id && (
+                  <p>
+                    <strong>TwelveLabs video_id:</strong> {cloudinaryLatest.result.video_id}
+                  </p>
+                )}
+
+                <div className="cloudinary-media-grid">
+                  {(
+                    [
+                      ['Thumbnail', cloudinaryLatest.result.transformed_media_urls?.thumbnail],
+                      ['Preview', cloudinaryLatest.result.transformed_media_urls?.preview],
+                      ['Overlay (text on image / first frame)', cloudinaryLatest.result.transformed_media_urls?.overlay],
+                    ] as const
+                  ).map(([label, u]) =>
+                    u ? (
+                      <figure key={label} className="cloudinary-fig">
+                        <figcaption>{label}</figcaption>
+                        <a href={u} target="_blank" rel="noreferrer">
+                          <img src={u} alt={label} loading="lazy" />
+                        </a>
+                      </figure>
+                    ) : null
+                  )}
+                </div>
+                {cloudinaryLatest.result.transformed_media_urls?.original_secure_url && (
+                  <p className="status">
+                    <a
+                      href={cloudinaryLatest.result.transformed_media_urls.original_secure_url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open original in Cloudinary
+                    </a>
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="twelvelabs-log-panel">
+              <h3>Recent events (stored)</h3>
+              {cloudinaryEvents.length === 0 ? (
+                <p>No stored webhook results yet.</p>
+              ) : (
+                <ul className="cloudinary-event-list">
+                  {cloudinaryEvents.map((row) => (
+                    <li key={row.id}>
+                      <strong>#{row.id}</strong> {row.created_at} — {row.status} — {row.public_id || 'n/a'} (
+                      {row.resource_type || '?'})
                     </li>
                   ))}
                 </ul>

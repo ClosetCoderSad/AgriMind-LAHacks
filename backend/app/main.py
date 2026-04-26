@@ -3,11 +3,12 @@ from __future__ import annotations
 import os
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 
 from backend.models.contracts import DecisionRequest, ExplainRequest, ExplainResponse
+from backend.services.cloudinary_pipeline import process_cloudinary_local_event, process_cloudinary_webhook
 from backend.services.pipeline import run_agri_pipeline
 from backend.services.twelvelabs_client import TwelveLabsClientService
 from backend.storage.local_store import LocalStore
@@ -44,9 +45,73 @@ class VideoQuestionRequest(BaseModel):
     question: str
 
 
+class CloudinaryLocalAnalyzeRequest(BaseModel):
+    public_id: str
+    secure_url: str
+    url: str | None = None
+    width: int | None = None
+    height: int | None = None
+    format: str | None = None
+    resource_type: str = "image"
+    bytes: int | None = None
+    created_at: str | None = None
+    tags: list[str] = []
+    version: int | str | None = None
+
+
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.post("/api/cloudinary/webhook")
+async def cloudinary_webhook(request: Request) -> dict:
+    """
+    Cloudinary upload/notification callback. Verifies X-Cld-Signature + X-Cld-Timestamp, runs
+    media + TwelveLabs + sustainability flow, and persists the result.
+    """
+    body = await request.body()
+    sig = request.headers.get("X-Cld-Signature") or request.headers.get("x-cld-signature")
+    ts = request.headers.get("X-Cld-Timestamp") or request.headers.get("x-cld-timestamp")
+    ct = request.headers.get("content-type") or request.headers.get("Content-Type")
+    out = process_cloudinary_webhook(body, ct, ts, sig)
+    data = out.model_dump(mode="json")
+    if out.status == "rejected":
+        raise HTTPException(status_code=403, detail=data)
+    eid = store.save_cloudinary_event(data)
+    data["event_id"] = eid
+    return data
+
+
+@app.get("/api/cloudinary/latest")
+def cloudinary_latest() -> dict:
+    row = store.latest_cloudinary_event()
+    if not row:
+        return {"status": "empty", "message": "No Cloudinary webhook events yet."}
+    return {
+        "status": "ok",
+        "id": row["id"],
+        "created_at": row["created_at"],
+        "result": row["result"],
+    }
+
+
+@app.get("/api/cloudinary/events")
+def cloudinary_events(limit: int = 20) -> list[dict]:
+    return store.list_cloudinary_events(limit=limit)
+
+
+@app.post("/api/cloudinary/local-analyze")
+def cloudinary_local_analyze(request: CloudinaryLocalAnalyzeRequest) -> dict:
+    """
+    Local-demo endpoint to simulate webhook-triggered analysis from an uploaded
+    Cloudinary asset payload directly.
+    """
+    out = process_cloudinary_local_event(request.model_dump(mode="json"))
+    data = out.model_dump(mode="json")
+    eid = store.save_cloudinary_event(data)
+    data["event_id"] = eid
+    return data
 
 
 @app.get("/api/history")

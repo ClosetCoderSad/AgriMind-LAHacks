@@ -43,6 +43,18 @@ class LocalStore:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS cloudinary_event_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL,
+                    public_id TEXT,
+                    resource_type TEXT,
+                    status TEXT NOT NULL,
+                    result_json TEXT NOT NULL
+                )
+                """
+            )
 
     def save_decision(self, payload: dict) -> None:
         with self._connect() as connection:
@@ -117,3 +129,67 @@ class LocalStore:
             "error",
         ]
         return [dict(zip(keys, row)) for row in rows]
+
+    def save_cloudinary_event(self, result: dict) -> int:
+        """Persist webhook processing result. Returns new row id."""
+        with self._connect() as connection:
+            cur = connection.execute(
+                """
+                INSERT INTO cloudinary_event_log (created_at, public_id, resource_type, status, result_json)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    datetime.now(timezone.utc).isoformat(),
+                    (result or {}).get("public_id") or (result or {}).get("publicId"),
+                    (result or {}).get("resource_type"),
+                    (result or {}).get("status", "unknown"),
+                    json.dumps(result, ensure_ascii=True),
+                ),
+            )
+            return int(cur.lastrowid)
+
+    def latest_cloudinary_event(self) -> dict | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, created_at, public_id, resource_type, status, result_json
+                FROM cloudinary_event_log
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "created_at": row[1],
+            "public_id": row[2],
+            "resource_type": row[3],
+            "status": row[4],
+            "result": json.loads(row[5]),
+        }
+
+    def list_cloudinary_events(self, limit: int = 20) -> list[dict]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, created_at, public_id, resource_type, status, result_json
+                FROM cloudinary_event_log
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (max(1, min(limit, 200)),),
+            ).fetchall()
+        out: list[dict] = []
+        for row in rows:
+            out.append(
+                {
+                    "id": row[0],
+                    "created_at": row[1],
+                    "public_id": row[2],
+                    "resource_type": row[3],
+                    "status": row[4],
+                    "result": json.loads(row[5]),
+                }
+            )
+        return out

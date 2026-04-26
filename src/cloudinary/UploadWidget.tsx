@@ -18,15 +18,23 @@ interface UploadWidgetProps {
   onUploadError?: (error: Error) => void;
   buttonText?: string;
   className?: string;
+  /** Merged into Cloudinary upload widget config (e.g. `tags`, `folder`, `context`) */
+  widgetOptions?: Record<string, unknown>;
 }
 
 interface CloudinaryWidgetResult {
   event: string;
-  info: CloudinaryUploadResult;
+  info: CloudinaryUploadResult | Record<string, unknown> | string;
 }
 
 interface CloudinaryWidgetError {
   message?: string;
+  status?: number;
+  http_code?: number;
+  name?: string;
+  error?: {
+    message?: string;
+  };
 }
 
 declare global {
@@ -45,6 +53,7 @@ export function UploadWidget({
   onUploadError,
   buttonText = 'Upload Image',
   className = '',
+  widgetOptions = {},
 }: UploadWidgetProps) {
   const widgetRef = useRef<{ open: () => void } | null>(null);
   const [isReady, setIsReady] = useState(false);
@@ -71,17 +80,52 @@ export function UploadWidget({
           uploadPreset: uploadPreset || undefined,
           sources: ['local', 'camera', 'url'],
           multiple: false,
+          ...widgetOptions,
         },
         (error: CloudinaryWidgetError | null, result: CloudinaryWidgetResult | null) => {
+          const extractResultErrorMessage = (): string | undefined => {
+            if (!result) return undefined;
+            if (result.event !== 'error') return undefined;
+            if (typeof result.info === 'string') return result.info;
+            if (!result.info || typeof result.info !== 'object') return undefined;
+            const infoObj = result.info as Record<string, unknown>;
+            const nested = infoObj.error;
+            if (nested && typeof nested === 'object') {
+              const nestedMsg = (nested as Record<string, unknown>).message;
+              if (typeof nestedMsg === 'string' && nestedMsg.trim()) {
+                return nestedMsg;
+              }
+            }
+            const directMsg = infoObj.message;
+            if (typeof directMsg === 'string' && directMsg.trim()) {
+              return directMsg;
+            }
+            return undefined;
+          };
+
           if (error) {
             console.error('Upload error:', error);
-            onUploadError?.(new Error(error.message || 'Upload failed'));
+            const detail =
+              error.message ||
+              error.error?.message ||
+              extractResultErrorMessage() ||
+              (typeof error.http_code === 'number' ? `HTTP ${error.http_code}` : undefined) ||
+              (typeof error.status === 'number' ? `HTTP ${error.status}` : undefined) ||
+              'Upload failed';
+            onUploadError?.(new Error(`Upload failed: ${detail}`));
+            return;
+          }
+
+          const resultErrorMessage = extractResultErrorMessage();
+          if (resultErrorMessage) {
+            console.error('Upload widget result error:', result);
+            onUploadError?.(new Error(`Upload failed: ${resultErrorMessage}`));
             return;
           }
 
           if (result && result.event === 'success') {
             console.log('Upload success:', result.info);
-            onUploadSuccess?.(result.info);
+            onUploadSuccess?.(result.info as CloudinaryUploadResult);
           }
         }
       );
@@ -124,7 +168,7 @@ export function UploadWidget({
       if (poll) clearInterval(poll);
       if (timeout) clearTimeout(timeout);
     };
-  }, [onUploadSuccess, onUploadError]);
+  }, [onUploadSuccess, onUploadError, widgetOptions]);
 
   const handleClick = () => {
     if (widgetRef.current) {

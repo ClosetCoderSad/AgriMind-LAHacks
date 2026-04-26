@@ -76,6 +76,13 @@ To create an unsigned upload preset:
 4. Add the preset name to your `.env` file
 5. **Save** the `.env` file and restart the dev server so the new values load correctly.
 
+### Webhook + event-driven analysis (AgriMind backend)
+
+- Point Cloudinary’s **Notification URL** (or upload preset) at `POST /api/cloudinary/webhook` on your public API base.
+- Set `CLOUDINARY_API_SECRET` and keep `CLOUDINARY_WEBHOOK_SKIP_VERIFY=false` in production; use skip-verify only for local tests.
+- For **ASI:One**, the orchestrator tool `agri.cloudinary_latest` calls `GET /api/cloudinary/latest` — set `AGRIMIND_API_BASE` to your API URL in the agent environment.
+- Full steps and submission notes: [docs/CLOUDINARY_WEBHOOK_AND_SUBMISSIONS.md](docs/CLOUDINARY_WEBHOOK_AND_SUBMISSIONS.md)
+
 ## AI Assistant Support
 
 This project includes AI coding rules for your selected AI assistant(s). The rules help AI assistants understand Cloudinary React SDK patterns, common errors, and best practices.

@@ -245,3 +245,66 @@ export async function askIndexedVideoQuestion(input: {
     }),
   });
 }
+
+/** Backed by POST /api/cloudinary/webhook (stored row) */
+export interface TransformedMediaUrlsApi {
+  thumbnail?: string | null;
+  preview?: string | null;
+  overlay?: string | null;
+  original_secure_url?: string | null;
+}
+
+export interface CloudinaryAnalysisResultApi {
+  status: string;
+  event_id?: number;
+  public_id: string;
+  resource_type: string;
+  analysis_summary: string;
+  risk_labels: string[];
+  recommended_action: string;
+  transformed_media_urls: TransformedMediaUrlsApi;
+  sustainability?: Record<string, unknown>;
+  video_id?: string | null;
+  index_id?: string | null;
+  stream_url?: string | null;
+  error?: string | null;
+  [key: string]: unknown;
+}
+
+export type CloudinaryLatestResponseApi =
+  | { status: 'empty'; message: string }
+  | { status: 'ok'; id: number; created_at: string; result: CloudinaryAnalysisResultApi };
+
+export interface CloudinaryEventRowApi {
+  id: number;
+  created_at: string;
+  public_id: string | null;
+  resource_type: string | null;
+  status: string;
+  result: CloudinaryAnalysisResultApi;
+}
+
+export async function getCloudinaryLatest(): Promise<CloudinaryLatestResponseApi> {
+  return fetchJson<CloudinaryLatestResponseApi>('/api/cloudinary/latest');
+}
+
+export async function getCloudinaryEvents(limit = 20): Promise<CloudinaryEventRowApi[]> {
+  return fetchJson<CloudinaryEventRowApi[]>(`/api/cloudinary/events?limit=${limit}`);
+}
+
+export async function runCloudinaryLocalAnalyze(input: CloudinaryUploadResult): Promise<CloudinaryAnalysisResultApi> {
+  return fetchJson<CloudinaryAnalysisResultApi>('/api/cloudinary/local-analyze', {
+    method: 'POST',
+    body: JSON.stringify({
+      public_id: input.public_id,
+      secure_url: input.secure_url,
+      url: input.url,
+      width: input.width,
+      height: input.height,
+      format: input.format,
+      resource_type: input.resource_type,
+      bytes: input.bytes,
+      created_at: input.created_at,
+    }),
+  });
+}
