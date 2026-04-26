@@ -1,5 +1,8 @@
 # AgriMind (LA Hacks 2026)
 
+##CHECK THIS OUT TOO - 
+https://github.com/Ahnaf-Muizz/AgriMind?fbclid=IwY2xjawRbC-JleHRuA2FlbQIxMQBzcnRjBmFwcF9pZAEwAAEeHDp0YuZOk_hXfi965PZa5ZPlD-qtLJ4a6mZI43Mp7RoBGNkm25Clj6kJ6Ow_aem_B4ViMvoU4dfGHiFVfY5mlQ
+
 AgriMind is a React + FastAPI + Fetch.ai multi-agent farming platform with Cloudinary media ingestion and TwelveLabs video intelligence.
 
 This README is the full local runbook: what to put in env files, what to run in each terminal, and how to expose the backend with ngrok for webhooks/agent demos.
