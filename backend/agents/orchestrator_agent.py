@@ -14,6 +14,7 @@ from uagents_core.contrib.protocols.chat import (
     ChatAcknowledgement,
     ChatMessage,
     EndSessionContent,
+    ResourceContent,
     TextContent,
     chat_protocol_spec,
 )
@@ -119,12 +120,14 @@ def _tool_help_text() -> str:
     return (
         "Send JSON with one of these tools: "
         "twelvelabs.ingest_video, twelvelabs.summarize_video, twelvelabs.ask_video, twelvelabs.analyze_video, "
-        "agri.cloudinary_latest. "
+        "agri.cloudinary_latest, agri.cloudinary_analyze_uri. "
         "agri.cloudinary_latest requires AGRIMIND_API_BASE to point at the FastAPI server and returns the most recent "
         "Cloudinary webhook + AI analysis (sustainability + transform URLs + TwelveLabs when enabled). "
+        "agri.cloudinary_analyze_uri uploads a public image/video URL to Cloudinary and runs the same analysis pipeline. "
         "Example: "
         '{"tool":"twelvelabs.analyze_video","args":{"video_url":"https://.../sample.mp4"}} '
-        'or {"tool":"agri.cloudinary_latest","args":{}}'
+        'or {"tool":"agri.cloudinary_latest","args":{}} '
+        'or {"tool":"agri.cloudinary_analyze_uri","args":{"uri":"https://.../image.webp"}}'
     )
 
 
@@ -233,6 +236,53 @@ def _run_tool(payload: dict) -> dict:
             "result": payload,
         }
 
+    if tool_name == "agri.cloudinary_analyze_uri":
+        uri = str(args.get("uri", "")).strip()
+        resource_type = str(args.get("resource_type", "image")).strip() or "image"
+        if not uri:
+            return {"status": "failed", "tool": tool_name, "error": "missing_uri"}
+        base = (os.getenv("AGRIMIND_API_BASE", "http://127.0.0.1:8000") or "").rstrip("/")
+        url = f"{base}/api/cloudinary/analyze-uri"
+        body = json.dumps({"uri": uri, "resource_type": resource_type}).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=35) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.URLError as exc:
+            return {
+                "status": "failed",
+                "tool": tool_name,
+                "error": str(exc),
+                "hint": "Ensure AGRIMIND_API_BASE is reachable and backend /api/cloudinary/analyze-uri is running.",
+            }
+        except Exception as exc:  # pragma: no cover
+            return {"status": "failed", "tool": tool_name, "error": str(exc)}
+        # Reuse latest formatter for consistency.
+        return {
+            "status": "success",
+            "tool": tool_name,
+            "format": "text",
+            "text": (
+                "Cloudinary URI Analysis Complete\n"
+                "-------------------------------\n"
+                f"Status: {payload.get('status', 'n/a')}\n"
+                f"Public ID: {payload.get('public_id', 'n/a')}\n"
+                f"Summary: {payload.get('analysis_summary', 'n/a')}\n"
+                f"Action: {payload.get('recommended_action', 'n/a')}\n"
+                "Media URLs\n"
+                f"- Original: {(payload.get('transformed_media_urls') or {}).get('original_secure_url', 'n/a')}\n"
+                f"- Preview: {(payload.get('transformed_media_urls') or {}).get('preview', 'n/a')}\n"
+                f"- Thumbnail: {(payload.get('transformed_media_urls') or {}).get('thumbnail', 'n/a')}\n"
+                f"- Overlay: {(payload.get('transformed_media_urls') or {}).get('overlay', 'n/a')}"
+            ),
+            "data": payload,
+        }
+
     if tool_name == "twelvelabs.analyze_video":
         video_id = str(args.get("video_id", "")).strip()
         video_url = str(args.get("video_url", "")).strip()
@@ -301,6 +351,36 @@ def _extract_json_payload(raw_text: str) -> dict | None:
         return None
 
 
+def _extract_first_http_url(text: str) -> str | None:
+    match = re.search(r"https?://\S+", text)
+    if not match:
+        return None
+    candidate = match.group(0).strip().rstrip(".,);")
+    return candidate or None
+
+
+def _guess_resource_type_from_text(text: str) -> str:
+    t = text.lower()
+    if any(ext in t for ext in [".mp4", ".mov", ".webm", ".mkv"]) or "video" in t:
+        return "video"
+    return "image"
+
+
+def _extract_resource_uri_from_content(msg: ChatMessage) -> tuple[str | None, str | None]:
+    for item in msg.content:
+        if isinstance(item, ResourceContent):
+            resource_obj = item.resource
+            primary = resource_obj[0] if isinstance(resource_obj, list) and resource_obj else resource_obj
+            uri = getattr(primary, "uri", None)
+            metadata = getattr(primary, "metadata", {}) or {}
+            mime = str(metadata.get("mime_type", "")).lower() if isinstance(metadata, dict) else ""
+            if uri:
+                if mime.startswith("video/"):
+                    return str(uri), "video"
+                return str(uri), "image"
+    return None, None
+
+
 @protocol.on_message(ChatMessage)
 async def handle_message(ctx: Context, sender: str, msg: ChatMessage) -> None:
     await ctx.send(
@@ -317,10 +397,28 @@ async def handle_message(ctx: Context, sender: str, msg: ChatMessage) -> None:
             text_chunks.append(item.text)
 
     user_text = " ".join(text_chunks).strip()
+    resource_uri, resource_type = _extract_resource_uri_from_content(msg)
 
     response_text = _tool_help_text()
 
     try:
+        if resource_uri:
+            response = _run_tool(
+                {
+                    "tool": "agri.cloudinary_analyze_uri",
+                    "args": {"uri": resource_uri, "resource_type": resource_type or "image"},
+                }
+            )
+            if (
+                isinstance(response, dict)
+                and str(response.get("format", "")).lower() == "text"
+                and isinstance(response.get("text"), str)
+            ):
+                response_text = str(response.get("text"))
+            else:
+                response_text = _json_text(response if isinstance(response, dict) else {"status": "failed"})
+            raise RuntimeError("handled_resource_flow")
+
         payload = _extract_json_payload(user_text)
         if isinstance(payload, dict) and payload.get("tool"):
             tool_output = _run_tool(payload)
@@ -348,8 +446,42 @@ async def handle_message(ctx: Context, sender: str, msg: ChatMessage) -> None:
                     "risk_level": decision.impact.risk_level,
                 }
             )
+        else:
+            # Natural language (non-JSON) fallbacks.
+            text_lower = user_text.lower()
+            maybe_uri = _extract_first_http_url(user_text)
+            if maybe_uri and "cloudinary" in text_lower and any(
+                k in text_lower for k in ["analy", "overlay", "upload", "image", "video"]
+            ):
+                output = _run_tool(
+                    {
+                        "tool": "agri.cloudinary_analyze_uri",
+                        "args": {"uri": maybe_uri, "resource_type": _guess_resource_type_from_text(user_text)},
+                    }
+                )
+                if (
+                    isinstance(output, dict)
+                    and str(output.get("format", "")).lower() == "text"
+                    and isinstance(output.get("text"), str)
+                ):
+                    response_text = str(output.get("text"))
+                else:
+                    response_text = _json_text(output if isinstance(output, dict) else {"status": "failed"})
+            elif "cloudinary" in text_lower and (
+                "latest" in text_lower or "overlay" in text_lower or "analy" in text_lower
+            ):
+                output = _run_tool({"tool": "agri.cloudinary_latest", "args": {}})
+                if (
+                    isinstance(output, dict)
+                    and str(output.get("format", "")).lower() == "text"
+                    and isinstance(output.get("text"), str)
+                ):
+                    response_text = str(output.get("text"))
+                else:
+                    response_text = _json_text(output if isinstance(output, dict) else {"status": "failed"})
     except Exception as exc:
-        ctx.logger.info("Orchestrator received non-JSON or invalid payload: %s", exc)
+        if str(exc) != "handled_resource_flow":
+            ctx.logger.info("Orchestrator received non-JSON or invalid payload: %s", exc)
 
     await ctx.send(
         sender,

@@ -19,6 +19,7 @@ from backend.services.cloudinary_client import (
     extract_cloud_name_from_url,
     normalize_to_media_event,
     parse_notification_body,
+    upload_external_uri_to_cloudinary,
     verify_notification_signature,
 )
 from backend.services.twelvelabs_client import TwelveLabsClientService
@@ -253,6 +254,18 @@ def process_cloudinary_local_event(payload: dict[str, Any]) -> CloudinaryAnalysi
     without requiring a webhook callback.
     """
     event = normalize_to_media_event(payload)
+    return _analyze_normalized_event(event)
+
+
+def process_cloudinary_uri_event(uri: str, resource_type: str = "image") -> CloudinaryAnalysisOutput:
+    """
+    ASI:One attachment helper:
+    - Upload remote URI to Cloudinary
+    - Normalize resulting asset
+    - Run same analysis/overlay pipeline
+    """
+    upload_result = upload_external_uri_to_cloudinary(uri, resource_type=resource_type)
+    event = normalize_to_media_event(upload_result)
     return _analyze_normalized_event(event)
 
 

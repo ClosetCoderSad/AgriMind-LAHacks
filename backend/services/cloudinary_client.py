@@ -10,6 +10,8 @@ import json
 import os
 import re
 import time
+import urllib.parse
+import urllib.request
 from typing import Any
 from urllib.parse import parse_qs, unquote, quote, urlparse
 from xml.etree import ElementTree
@@ -19,7 +21,11 @@ from backend.models.cloudinary_contracts import NormalizedMediaEvent, Transforme
 
 def _get_env() -> dict[str, str | bool | int]:
     return {
-        "cloud_name": (os.getenv("CLOUDINARY_CLOUD_NAME", "") or "").strip(),
+        "cloud_name": (
+            os.getenv("CLOUDINARY_CLOUD_NAME", "")
+            or os.getenv("VITE_CLOUDINARY_CLOUD_NAME", "")
+            or ""
+        ).strip(),
         "api_secret": (os.getenv("CLOUDINARY_API_SECRET", "") or "").strip(),
         "skip_verify": (os.getenv("CLOUDINARY_WEBHOOK_SKIP_VERIFY", "false").lower() == "true"),
         "max_timestamp_age_sec": int(os.getenv("CLOUDINARY_WEBHOOK_MAX_AGE_SEC", "7200")),
@@ -279,7 +285,12 @@ def build_transformation_urls(
     Programmable delivery URLs: thumbnail, preview, optional text overlay.
     public_id can include path segments; safe for res.cloudinary.com.
     """
-    cloud = (cloud_name or os.getenv("CLOUDINARY_CLOUD_NAME", "") or "").strip()
+    cloud = (
+        cloud_name
+        or os.getenv("CLOUDINARY_CLOUD_NAME", "")
+        or os.getenv("VITE_CLOUDINARY_CLOUD_NAME", "")
+        or ""
+    ).strip()
     if not cloud or not public_id:
         return TransformedMediaUrls(overlay=None, thumbnail=None, preview=None, original_secure_url=None)
 
@@ -299,7 +310,8 @@ def build_transformation_urls(
     pr_t = f"c_fill,h_480,w_800,q_auto:good" if rt == "video" else f"c_limit,h_480,w_800,q_auto:best"
 
     def join_url(t: str) -> str:
-        return f"https://res.cloudinary.com/{cloud}/{base_path}/{vseg}{t}/{public_path}"
+        # Cloudinary delivery URL format: .../upload/<transformations>/v<version>/<public_id>
+        return f"https://res.cloudinary.com/{cloud}/{base_path}/{t}/{vseg}{public_path}"
 
     thumb = join_url(th_t)
     preview = join_url(pr_t)
@@ -322,11 +334,11 @@ def build_transformation_urls(
     labels_enc = quote(_overlay_text(f"Labels: {labels_text}"), safe="")
     if rt == "image":
         overlay = (
-            f"https://res.cloudinary.com/{cloud}/{base_path}/{vseg}c_fill,h_480,w_800,q_auto"
+            f"https://res.cloudinary.com/{cloud}/{base_path}/c_fill,h_480,w_800,q_auto"
             f"/l_text:Arial_32_bold:{risk_enc},g_south_west,y_20,x_20,co_rgb:2ecc71"
             f"/l_text:Arial_24:{moist_enc},g_south_west,y_64,x_20,co_rgb:ffffff"
             f"/l_text:Arial_18:{labels_enc},g_south_west,y_98,x_20,co_rgb:ffffff"
-            f"/{public_path}"
+            f"/{vseg}{public_path}"
         )
     else:
         # First video frame (jpg) with explainable text overlays
@@ -359,3 +371,53 @@ def extract_cloud_name_from_url(secure_url: str | None) -> str | None:
         if segs and segs[0]:
             return segs[0]
     return None
+
+
+def upload_external_uri_to_cloudinary(uri: str, resource_type: str = "image") -> dict[str, Any]:
+    """
+    Upload a remote media URI into Cloudinary using an unsigned upload preset.
+    Required env:
+      - CLOUDINARY_CLOUD_NAME
+      - CLOUDINARY_INGEST_UPLOAD_PRESET (or VITE_CLOUDINARY_UPLOAD_PRESET fallback)
+    """
+    cloud = (
+        os.getenv("CLOUDINARY_CLOUD_NAME", "")
+        or os.getenv("VITE_CLOUDINARY_CLOUD_NAME", "")
+        or ""
+    ).strip()
+    preset = (
+        os.getenv("CLOUDINARY_INGEST_UPLOAD_PRESET", "")
+        or os.getenv("VITE_CLOUDINARY_UPLOAD_PRESET", "")
+        or ""
+    ).strip()
+    if not cloud:
+        raise ValueError("missing_cloudinary_cloud_name")
+    if not preset:
+        raise ValueError("missing_cloudinary_ingest_upload_preset")
+    if not uri or not str(uri).strip():
+        raise ValueError("missing_uri")
+
+    rt = (resource_type or "image").strip().lower()
+    if rt not in {"image", "video", "raw", "auto"}:
+        rt = "image"
+    endpoint = f"https://api.cloudinary.com/v1_1/{cloud}/{rt}/upload"
+    payload = urllib.parse.urlencode(
+        {
+            "file": uri.strip(),
+            "upload_preset": preset,
+            "folder": "agrimind/asi-one",
+            "tags": "asi-one,agrimind",
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint,
+        data=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        raw = resp.read().decode("utf-8", errors="replace")
+    data = json.loads(raw)
+    if not isinstance(data, dict):
+        raise ValueError("invalid_cloudinary_upload_response")
+    return data

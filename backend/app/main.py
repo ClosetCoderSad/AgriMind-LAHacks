@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -8,11 +9,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 
 from backend.models.contracts import DecisionRequest, ExplainRequest, ExplainResponse
-from backend.services.cloudinary_pipeline import process_cloudinary_local_event, process_cloudinary_webhook
+from backend.services.cloudinary_pipeline import (
+    process_cloudinary_local_event,
+    process_cloudinary_uri_event,
+    process_cloudinary_webhook,
+)
 from backend.services.pipeline import run_agri_pipeline
 from backend.services.twelvelabs_client import TwelveLabsClientService
 from backend.storage.local_store import LocalStore
 
+# Prefer backend/.env explicitly, then allow ambient env vars.
+_backend_env_path = Path(__file__).resolve().parents[1] / ".env"
+load_dotenv(dotenv_path=_backend_env_path)
 load_dotenv()
 
 cors_origin = os.getenv("CORS_ORIGIN", "http://localhost:5173")
@@ -57,6 +65,11 @@ class CloudinaryLocalAnalyzeRequest(BaseModel):
     created_at: str | None = None
     tags: list[str] = []
     version: int | str | None = None
+
+
+class CloudinaryUriAnalyzeRequest(BaseModel):
+    uri: str
+    resource_type: str = "image"
 
 
 @app.get("/api/health")
@@ -108,6 +121,22 @@ def cloudinary_local_analyze(request: CloudinaryLocalAnalyzeRequest) -> dict:
     Cloudinary asset payload directly.
     """
     out = process_cloudinary_local_event(request.model_dump(mode="json"))
+    data = out.model_dump(mode="json")
+    eid = store.save_cloudinary_event(data)
+    data["event_id"] = eid
+    return data
+
+
+@app.post("/api/cloudinary/analyze-uri")
+def cloudinary_analyze_uri(request: CloudinaryUriAnalyzeRequest) -> dict:
+    """
+    Upload an external URI to Cloudinary, analyze it with the same pipeline, and persist.
+    Useful for ASI:One attachment/resource URIs.
+    """
+    try:
+        out = process_cloudinary_uri_event(request.uri, resource_type=request.resource_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"status": "failed", "error": str(exc)}) from exc
     data = out.model_dump(mode="json")
     eid = store.save_cloudinary_event(data)
     data["event_id"] = eid

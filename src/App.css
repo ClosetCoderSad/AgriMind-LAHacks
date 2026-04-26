@@ -427,6 +427,18 @@ select {
   margin-top: 0.75rem;
 }
 
+.sustainability-panel {
+  background: #f8fff9;
+  border: 1px solid #dcf2e2;
+  border-radius: 0.6rem;
+  padding: 0.55rem 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.sustainability-panel p {
+  margin: 0.25rem 0;
+}
+
 .cloudinary-media-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

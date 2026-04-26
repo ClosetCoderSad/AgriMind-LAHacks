@@ -1019,12 +1019,31 @@ function App() {
                     <strong>Labels:</strong> {cloudinaryLatest.result.risk_labels.join(' · ')}
                   </p>
                 )}
-                {cloudinaryLatest.result.sustainability && Object.keys(cloudinaryLatest.result.sustainability).length > 0 && (
-                  <p>
-                    <strong>Sustainability:</strong>{' '}
-                    {JSON.stringify(cloudinaryLatest.result.sustainability)}
-                  </p>
-                )}
+                {cloudinaryLatest.result.sustainability &&
+                  Object.keys(cloudinaryLatest.result.sustainability).length > 0 && (
+                    <div className="sustainability-panel">
+                      <p>
+                        <strong>Sustainability:</strong>
+                      </p>
+                      {(() => {
+                        const s = cloudinaryLatest.result.sustainability as Record<string, unknown>;
+                        const water = s.water_saved_liters_estimate;
+                        const carbon = s.carbon_kg_co2e_avoided_estimate;
+                        const trips = s.avoided_trip_km_estimate;
+                        const note = s.waste_reduction_note;
+                        const method = s.method;
+                        return (
+                          <>
+                            <p>- Water saved estimate: {water ?? 'n/a'} L</p>
+                            <p>- Carbon avoided estimate: {carbon ?? 'n/a'} kg CO2e</p>
+                            <p>- Travel avoided estimate: {trips ?? 'n/a'} km</p>
+                            {note ? <p>- Waste reduction note: {String(note)}</p> : null}
+                            {method ? <p>- Method: {String(method)}</p> : null}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
                 {cloudinaryLatest.result.video_id && (
                   <p>
                     <strong>TwelveLabs video_id:</strong> {cloudinaryLatest.result.video_id}
