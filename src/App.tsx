@@ -125,6 +125,8 @@ const SENSOR_TREND_DATA: SensorTrendPoint[] = [
 ];
 const TREND_REFRESH_MS = 2500;
 const TREND_POINT_LIMIT = 24;
+const LANDING_TAGLINE = 'Smart farming intelligence';
+const LANDING_HEADING = 'AgriMind powers better farm decisions.';
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -604,6 +606,8 @@ function App({ authEnabled = false }: AppProps) {
   const [diseasePredictions, setDiseasePredictions] = useState<DiseasePredictionItem[]>([]);
   const [isClassifyingDisease, setIsClassifyingDisease] = useState(false);
   const [diseaseClassificationError, setDiseaseClassificationError] = useState('');
+  const [typedLandingTagline, setTypedLandingTagline] = useState(LANDING_TAGLINE);
+  const [typedLandingHeading, setTypedLandingHeading] = useState(LANDING_HEADING);
   const indexedPreviewVideoRef = useRef<HTMLVideoElement | null>(null);
   const diseaseFileInputRef = useRef<HTMLInputElement | null>(null);
   const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
@@ -921,6 +925,53 @@ function App({ authEnabled = false }: AppProps) {
     };
   }, [diseasePreviewUrl]);
 
+  useEffect(() => {
+    if (activeRoute !== 'landing') {
+      setTypedLandingTagline(LANDING_TAGLINE);
+      setTypedLandingHeading(LANDING_HEADING);
+      return;
+    }
+
+    let cancelled = false;
+    const timeoutIds: number[] = [];
+
+    const wait = (ms: number): Promise<void> =>
+      new Promise((resolve) => {
+        const id = window.setTimeout(resolve, ms);
+        timeoutIds.push(id);
+      });
+
+    const runTypingLoop = async () => {
+      while (!cancelled) {
+        setTypedLandingTagline('');
+        setTypedLandingHeading('');
+
+        for (let i = 1; i <= LANDING_TAGLINE.length; i += 1) {
+          if (cancelled) return;
+          setTypedLandingTagline(LANDING_TAGLINE.slice(0, i));
+          await wait(42);
+        }
+
+        await wait(180);
+
+        for (let i = 1; i <= LANDING_HEADING.length; i += 1) {
+          if (cancelled) return;
+          setTypedLandingHeading(LANDING_HEADING.slice(0, i));
+          await wait(35);
+        }
+
+        await wait(15000);
+      }
+    };
+
+    void runTypingLoop();
+
+    return () => {
+      cancelled = true;
+      timeoutIds.forEach((id) => window.clearTimeout(id));
+    };
+  }, [activeRoute]);
+
   const navigateToPage = (page: AppPage) => {
     if (authEnabled && !isAuthenticated) {
       navigateToAuth();
@@ -1227,9 +1278,15 @@ function App({ authEnabled = false }: AppProps) {
 
         <section className="landing-hero">
           <div className="landing-overlay" />
+          <img
+            className="landing-hero-mascot"
+            src="/landing-bot-v3.png"
+            alt="AgriMind helper robot"
+            loading="lazy"
+          />
           <div className="landing-content">
-            <p className="landing-tag">Smart farming intelligence</p>
-            <h1>AgriMind powers better farm decisions.</h1>
+            <p className="landing-tag">{typedLandingTagline}</p>
+            <h1>{typedLandingHeading}</h1>
             <p>
               Monitor crop health, analyze visual signals, and optimize irrigation from one intelligent platform.
             </p>

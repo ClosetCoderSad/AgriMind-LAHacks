@@ -126,11 +126,37 @@
   );
 }
 
+.landing-hero-mascot {
+  position: absolute;
+  right: 8%;
+  top: 52%;
+  transform: translateY(-50%);
+  width: clamp(190px, 25vw, 360px);
+  z-index: 1;
+  pointer-events: none;
+  user-select: none;
+  opacity: 1;
+  filter: saturate(1.06) drop-shadow(0 14px 22px rgba(0, 0, 0, 0.4));
+  animation: mascot-float 2.8s ease-in-out infinite;
+}
+
 .landing-content {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   max-width: 520px;
   padding: 6.5rem 2rem 2rem;
+}
+
+@keyframes mascot-float {
+  0% {
+    transform: translateY(-46%);
+  }
+  50% {
+    transform: translateY(-56%);
+  }
+  100% {
+    transform: translateY(-46%);
+  }
 }
 
 .landing-tag {
